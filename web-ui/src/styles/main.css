@@ -1,0 +1,92 @@
+@import "tailwindcss";
+@import "./apple-hig-theme.css";
+
+@theme {
+  /* Apple HIG System Colors - Integrated into Tailwind */
+
+  /* Grey scale (mapped to systemGray) */
+  --color-grey-50: #f2f2f7;   /* systemGray6 */
+  --color-grey-100: #e5e5ea;  /* systemGray5 */
+  --color-grey-200: #d1d1d6;  /* systemGray4 */
+  --color-grey-300: #c7c7cc;  /* systemGray3 */
+  --color-grey-400: #aeaeb2;  /* systemGray2 */
+  --color-grey-500: #8e8e93;  /* systemGray */
+  --color-grey-600: #636366;  /* darker systemGray */
+  --color-grey-700: #48484a;  /* darker */
+  --color-grey-800: #3a3a3c;  /* darker */
+  --color-grey-900: #000000;  /* label */
+
+  /* Blue scale (mapped to systemBlue) */
+  --color-blue-50: #e5f2ff;
+  --color-blue-100: #cce5ff;
+  --color-blue-200: #99ccff;
+  --color-blue-300: #66b2ff;
+  --color-blue-400: #3399ff;
+  --color-blue-500: #007AFF;  /* systemBlue */
+  --color-blue-600: #0062cc;
+  --color-blue-700: #004999;
+  --color-blue-800: #003166;
+  --color-blue-900: #001833;
+
+  /* Indigo scale (mapped to systemIndigo) */
+  --color-indigo-50: #f0f0ff;
+  --color-indigo-100: #e0e0ff;
+  --color-indigo-200: #c2c1ff;
+  --color-indigo-300: #a3a2ff;
+  --color-indigo-400: #8583ff;
+  --color-indigo-500: #5856D6;  /* systemIndigo */
+  --color-indigo-600: #4645ab;
+  --color-indigo-700: #353480;
+  --color-indigo-800: #232255;
+  --color-indigo-900: #12112b;
+
+  /* Purple scale (mapped to systemPurple) */
+  --color-purple-50: #f9f0ff;
+  --color-purple-100: #f2e0ff;
+  --color-purple-200: #e5c2ff;
+  --color-purple-300: #d8a3ff;
+  --color-purple-400: #cb85ff;
+  --color-purple-500: #AF52DE;  /* systemPurple */
+  --color-purple-600: #8c42b2;
+  --color-purple-700: #693185;
+  --color-purple-800: #462159;
+  --color-purple-900: #23102c;
+
+  /* Orange scale (mapped to systemOrange) */
+  --color-orange-50: #fff7e5;
+  --color-orange-100: #ffefcc;
+  --color-orange-200: #ffdf99;
+  --color-orange-300: #ffcf66;
+  --color-orange-400: #ffbf33;
+  --color-orange-500: #FF9500;  /* systemOrange */
+  --color-orange-600: #cc7700;
+  --color-orange-700: #995900;
+  --color-orange-800: #663c00;
+  --color-orange-900: #331e00;
+
+  /* Green scale (mapped to systemGreen) */
+  --color-green-50: #e5f9ec;
+  --color-green-100: #ccf3d9;
+  --color-green-200: #99e7b3;
+  --color-green-300: #66db8d;
+  --color-green-400: #33cf67;
+  --color-green-500: #4CD964;  /* systemGreen */
+  --color-green-600: #3dae50;
+  --color-green-700: #2e823c;
+  --color-green-800: #1e5728;
+  --color-green-900: #0f2b14;
+
+  /* Red scale (mapped to systemRed) */
+  --color-red-50: #ffe5e3;
+  --color-red-100: #ffccc8;
+  --color-red-200: #ff9991;
+  --color-red-300: #ff665a;
+  --color-red-400: #ff3323;
+  --color-red-500: #FF3B30;  /* systemRed */
+  --color-red-600: #cc2f26;
+  --color-red-700: #99231d;
+  --color-red-800: #661813;
+  --color-red-900: #330c0a;
+}
+
+/* Apple HIG styles are imported from apple-hig-theme.css */

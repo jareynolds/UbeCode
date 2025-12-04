@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  design-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: design-service
+    ports:
+      - "9081:9081"
+    environment:
+      - PORT=9081
+    networks:
+      - ubecode-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  capability-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: capability-service
+    ports:
+      - "9082:9082"
+    environment:
+      - PORT=9082
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=ubecode_user
+      - DB_PASSWORD=ubecode_password
+      - DB_NAME=ubecode_db
+    networks:
+      - ubecode-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  integration-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: integration-service
+    ports:
+      - "9080:9080"
+      - "4000:4000"
+      - "4080:4080"
+      - "4173:4173"
+      - "4500:4500"
+      - "4800:4800"
+    environment:
+      - PORT=9080
+      - FIGMA_TOKEN=${FIGMA_TOKEN}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      - ./workspaces:/root/workspaces
+      - ./AI_Principles:/root/AI_Principles
+    networks:
+      - ubecode-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: auth-service
+    ports:
+      - "9083:9083"
+    environment:
+      - PORT=9083
+      - DATABASE_URL=postgres://ubecode_user:ubecode_password@postgres:5432/ubecode_db?sslmode=disable
+      - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-in-production}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL:-http://localhost:6173/auth/google/callback}
+    networks:
+      - ubecode-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9083/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=ubecode_user
+      - POSTGRES_PASSWORD=ubecode_password
+      - POSTGRES_DB=ubecode_db
+    ports:
+      - "6432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - ubecode-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ubecode_user -d ubecode_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  ubecode-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

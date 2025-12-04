@@ -1,0 +1,4658 @@
+// Balut — Copyright © 2025 James Reynolds
+//
+// This file is part of Balut.
+// You may use this file under either:
+//   • The AGPLv3 Open Source License, OR
+//   • The Balut Commercial License
+// See the LICENSE.AGPL and LICENSE.COMMERCIAL files for details.
+
+package integration
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Handler handles HTTP requests for the integration service
+type Handler struct {
+	service *Service
+}
+
+// NewHandler creates a new handler
+func NewHandler(service *Service) *Handler {
+	return &Handler{
+		service: service,
+	}
+}
+
+// HandleGetFile handles GET /figma/files/{fileKey}
+func (h *Handler) HandleGetFile(w http.ResponseWriter, r *http.Request) {
+	fileKey := r.PathValue("fileKey")
+	if fileKey == "" {
+		http.Error(w, "file key is required", http.StatusBadRequest)
+		return
+	}
+
+	file, err := h.service.GetFigmaFile(r.Context(), fileKey)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(file)
+}
+
+// HandleGetComments handles GET /figma/files/{fileKey}/comments
+func (h *Handler) HandleGetComments(w http.ResponseWriter, r *http.Request) {
+	fileKey := r.PathValue("fileKey")
+	if fileKey == "" {
+		http.Error(w, "file key is required", http.StatusBadRequest)
+		return
+	}
+
+	comments, err := h.service.GetFigmaComments(r.Context(), fileKey)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(comments)
+}
+
+// HandleHealth handles GET /health
+func (h *Handler) HandleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": "healthy",
+	})
+}
+
+// AnalyzeIntegrationRequest represents the request body for analyzing an integration
+type AnalyzeIntegrationRequest struct {
+	ProviderURL  string `json:"provider_url"`
+	ProviderName string `json:"provider_name"`
+	AnthropicKey string `json:"anthropic_key"`
+}
+
+// HandleAnalyzeIntegration handles POST /analyze-integration
+func (h *Handler) HandleAnalyzeIntegration(w http.ResponseWriter, r *http.Request) {
+	var req AnalyzeIntegrationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ProviderURL == "" {
+		http.Error(w, "provider_url is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.ProviderName == "" {
+		http.Error(w, "provider_name is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.AnthropicKey == "" {
+		http.Error(w, "anthropic_key is required", http.StatusBadRequest)
+		return
+	}
+
+	// Create Anthropic client with the provided API key
+	client := NewAnthropicClient(req.AnthropicKey)
+
+	// Analyze the integration
+	analysis, err := client.AnalyzeIntegrationAPI(r.Context(), req.ProviderURL, req.ProviderName)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to analyze integration: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(analysis)
+}
+
+// HandleFetchResources handles POST /fetch-resources
+func (h *Handler) HandleFetchResources(w http.ResponseWriter, r *http.Request) {
+	var req FetchResourcesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.IntegrationName == "" {
+		http.Error(w, "integration_name is required", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Credentials) == 0 {
+		http.Error(w, "credentials are required", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch resources from the integration
+	response, err := FetchResources(r.Context(), req)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to fetch resources: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// SuggestResourcesRequest represents the request for AI-suggested resources
+type SuggestResourcesRequest struct {
+	WorkspaceName   string                  `json:"workspace_name"`
+	WorkspaceDesc   string                  `json:"workspace_description"`
+	IntegrationName string                  `json:"integration_name"`
+	Resources       []IntegrationResource   `json:"resources"`
+	AnthropicKey    string                  `json:"anthropic_key"`
+}
+
+// SuggestResourcesResponse represents AI suggestions for which resources to integrate
+type SuggestResourcesResponse struct {
+	Suggestions []ResourceSuggestion `json:"suggestions"`
+	Reasoning   string              `json:"reasoning"`
+}
+
+// ResourceSuggestion represents a suggested resource to integrate
+type ResourceSuggestion struct {
+	ResourceID  string  `json:"resource_id"`
+	ResourceName string `json:"resource_name"`
+	Reason      string  `json:"reason"`
+	Confidence  float64 `json:"confidence"` // 0.0 to 1.0
+}
+
+// HandleSuggestResources handles POST /suggest-resources
+func (h *Handler) HandleSuggestResources(w http.ResponseWriter, r *http.Request) {
+	var req SuggestResourcesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspaceName == "" {
+		http.Error(w, "workspace_name is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.AnthropicKey == "" {
+		http.Error(w, "anthropic_key is required", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Resources) == 0 {
+		http.Error(w, "resources are required", http.StatusBadRequest)
+		return
+	}
+
+	// Create Anthropic client
+	client := NewAnthropicClient(req.AnthropicKey)
+
+	// Generate AI suggestions
+	suggestions, err := client.SuggestResources(r.Context(), req)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to generate suggestions: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(suggestions)
+}
+
+// HandleFetchFiles handles POST /fetch-files
+func (h *Handler) HandleFetchFiles(w http.ResponseWriter, r *http.Request) {
+	var req FetchFilesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.IntegrationName == "" {
+		http.Error(w, "integration_name is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.ResourceID == "" {
+		http.Error(w, "resource_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Credentials) == 0 {
+		http.Error(w, "credentials are required", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch files from the integration resource
+	response, err := FetchFiles(r.Context(), req)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to fetch files: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// HandleFetchFileMeta handles POST /fetch-file-meta
+func (h *Handler) HandleFetchFileMeta(w http.ResponseWriter, r *http.Request) {
+	var req FetchFileMetaRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.IntegrationName == "" {
+		http.Error(w, "integration_name is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.FileKey == "" {
+		http.Error(w, "file_key is required", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Credentials) == 0 {
+		http.Error(w, "credentials are required", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch file metadata from the integration
+	response, err := FetchFileMeta(r.Context(), req)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to fetch file metadata: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// SpecificationFile represents a specification markdown file
+type SpecificationFile struct {
+	Filename string `json:"filename"`
+	Content  string `json:"content"`
+}
+
+// ListSpecificationsResponse represents the response for listing specifications
+type ListSpecificationsResponse struct {
+	Files []SpecificationFile `json:"files"`
+}
+
+// HandleListSpecifications handles GET /specifications/list
+func (h *Handler) HandleListSpecifications(w http.ResponseWriter, r *http.Request) {
+	workspace := r.URL.Query().Get("workspace")
+	if workspace == "" {
+		http.Error(w, "workspace parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	fmt.Printf("[ListSpecifications] Workspace path received: %s\n", workspace)
+
+	// Construct path to workspace specifications folder
+	// Handle both relative and absolute paths
+	// If relative (e.g., "workspaces/AI-Builder"), resolve from current working directory
+	// If absolute (e.g., "/root/workspaces/Qamera"), use as-is
+	var workspacePath string
+	if filepath.IsAbs(workspace) {
+		workspacePath = filepath.Join(workspace, "specifications")
+	} else {
+		// Get current working directory (should be project root)
+		cwd, err := os.Getwd()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to get working directory: %v", err), http.StatusInternalServerError)
+			return
+		}
+		workspacePath = filepath.Join(cwd, workspace, "specifications")
+	}
+
+	fmt.Printf("[ListSpecifications] Looking for specifications in: %s\n", workspacePath)
+
+	// Check if directory exists
+	if _, err := os.Stat(workspacePath); os.IsNotExist(err) {
+		fmt.Printf("[ListSpecifications] ERROR: Directory not found: %s\n", workspacePath)
+		http.Error(w, fmt.Sprintf("workspace specifications not found: %s", workspacePath), http.StatusNotFound)
+		return
+	}
+
+	// Read all markdown files from the directory
+	files, err := os.ReadDir(workspacePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to read specifications directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var specFiles []SpecificationFile
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		// Only process .md files
+		filename := file.Name()
+		if !strings.HasSuffix(filename, ".md") {
+			continue
+		}
+
+		// Skip summary files
+		if strings.Contains(filename, "SUMMARY") || strings.Contains(filename, "INDEX") {
+			continue
+		}
+
+		// Prioritize CAP* and ENB* files, but also include other .md files
+		upperFilename := strings.ToUpper(filename)
+		isCapability := strings.HasPrefix(upperFilename, "CAP")
+		isEnabler := strings.HasPrefix(upperFilename, "ENB")
+		isStory := strings.HasPrefix(upperFilename, "STORY")
+		isState := strings.HasPrefix(upperFilename, "STATE")
+		isSeq := strings.HasPrefix(upperFilename, "SEQ")
+		isData := strings.HasPrefix(upperFilename, "DATA")
+		isClass := strings.HasPrefix(upperFilename, "CLASS")
+
+		// Include CAP, ENB, and other specification files (not diagram files)
+		if !isCapability && !isEnabler && !isStory && (isState || isSeq || isData || isClass) {
+			continue // Skip diagram export files
+		}
+
+		// Read file content
+		filePath := filepath.Join(workspacePath, filename)
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			continue // Skip files we can't read
+		}
+
+		specFiles = append(specFiles, SpecificationFile{
+			Filename: filename,
+			Content:  string(content),
+		})
+	}
+
+	fmt.Printf("[ListSpecifications] Found %d specification files in %s\n", len(specFiles), workspacePath)
+
+	response := ListSpecificationsResponse{
+		Files: specFiles,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// AnalyzeSpecificationsRequest represents the request for analyzing specifications
+type AnalyzeSpecificationsRequest struct {
+	Files        []SpecificationFile `json:"files"`
+	AnthropicKey string              `json:"anthropic_key"`
+}
+
+// CapabilitySpec represents a parsed capability
+type CapabilitySpec struct {
+	ID                   string   `json:"id"`
+	Name                 string   `json:"name"`
+	Status               string   `json:"status"`
+	Type                 string   `json:"type"`
+	Enablers             []string `json:"enablers"`
+	UpstreamDependencies []string `json:"upstreamDependencies"`
+	DownstreamImpacts    []string `json:"downstreamImpacts"`
+}
+
+// EnablerSpec represents a parsed enabler
+type EnablerSpec struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	CapabilityID string `json:"capabilityId"`
+	Status       string `json:"status"`
+	Type         string `json:"type"`
+}
+
+// AnalyzeSpecificationsResponse represents the parsed specifications
+type AnalyzeSpecificationsResponse struct {
+	Capabilities []CapabilitySpec `json:"capabilities"`
+	Enablers     []EnablerSpec    `json:"enablers"`
+}
+
+// HandleAnalyzeSpecifications handles POST /specifications/analyze
+func (h *Handler) HandleAnalyzeSpecifications(w http.ResponseWriter, r *http.Request) {
+	var req AnalyzeSpecificationsRequest
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Files) == 0 {
+		http.Error(w, "files are required", http.StatusBadRequest)
+		return
+	}
+
+	if req.AnthropicKey == "" {
+		http.Error(w, "anthropic_key is required", http.StatusBadRequest)
+		return
+	}
+
+	// Pre-process files to deterministically create capabilities and enablers
+	// based on filename prefixes (CAP*, ENB*)
+	var preCapabilities []CapabilitySpec
+	var preEnablers []EnablerSpec
+	capCounter := 1
+	enbCounter := 1
+
+	for _, file := range req.Files {
+		upperFilename := strings.ToUpper(file.Filename)
+
+		// Extract name from first heading or filename
+		displayName := strings.TrimSuffix(file.Filename, ".md")
+		lines := strings.Split(file.Content, "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "# ") {
+				displayName = strings.TrimPrefix(line, "# ")
+				displayName = strings.TrimSpace(displayName)
+				break
+			}
+		}
+
+		// Extract status from content
+		status := "Planned"
+		for _, line := range lines {
+			lowerLine := strings.ToLower(line)
+			if strings.Contains(lowerLine, "status") {
+				if strings.Contains(lowerLine, "implemented") || strings.Contains(lowerLine, "complete") {
+					status = "Implemented"
+				} else if strings.Contains(lowerLine, "progress") {
+					status = "In Progress"
+				}
+				break
+			}
+		}
+
+		// Check if capability file (matches: CAP*, capability*, capabilities*)
+		isCapability := strings.HasPrefix(upperFilename, "CAP") ||
+			strings.HasPrefix(upperFilename, "CAPABILITY") ||
+			strings.HasPrefix(upperFilename, "CAPABILITIES")
+
+		// Check if enabler file (matches: ENB*, enabler*)
+		isEnabler := strings.HasPrefix(upperFilename, "ENB") ||
+			strings.HasPrefix(upperFilename, "ENABLER")
+
+		if isCapability {
+			capID := fmt.Sprintf("CAP-%03d", capCounter)
+			capCounter++
+			preCapabilities = append(preCapabilities, CapabilitySpec{
+				ID:                   capID,
+				Name:                 displayName,
+				Status:               status,
+				Type:                 "Capability",
+				Enablers:             []string{},
+				UpstreamDependencies: []string{},
+				DownstreamImpacts:    []string{},
+			})
+			fmt.Printf("[Analyze] Pre-created capability from %s: %s\n", file.Filename, displayName)
+		} else if isEnabler {
+			enbID := fmt.Sprintf("ENB-%03d", enbCounter)
+			enbCounter++
+			preEnablers = append(preEnablers, EnablerSpec{
+				ID:           enbID,
+				Name:         displayName,
+				CapabilityID: "", // Will be determined by AI
+				Status:       status,
+				Type:         "Enabler",
+			})
+			fmt.Printf("[Analyze] Pre-created enabler from %s: %s\n", file.Filename, displayName)
+		}
+	}
+
+	fmt.Printf("[Analyze] Pre-created %d capabilities and %d enablers from filenames\n", len(preCapabilities), len(preEnablers))
+
+	// If we have pre-created items, use AI only for relationships
+	// Otherwise, fall back to full AI analysis
+	if len(preCapabilities) > 0 || len(preEnablers) > 0 {
+		// Build a simpler prompt just for relationships
+		var filesContent strings.Builder
+		filesContent.WriteString("Analyze these specification files and determine relationships between capabilities and enablers.\n\n")
+
+		filesContent.WriteString("EXISTING CAPABILITIES:\n")
+		for _, cap := range preCapabilities {
+			filesContent.WriteString(fmt.Sprintf("- %s: %s\n", cap.ID, cap.Name))
+		}
+		filesContent.WriteString("\nEXISTING ENABLERS:\n")
+		for _, enb := range preEnablers {
+			filesContent.WriteString(fmt.Sprintf("- %s: %s\n", enb.ID, enb.Name))
+		}
+		filesContent.WriteString("\nFILE CONTENTS:\n\n")
+
+		for _, file := range req.Files {
+			filesContent.WriteString(fmt.Sprintf("=== File: %s ===\n", file.Filename))
+			filesContent.WriteString(file.Content)
+			filesContent.WriteString("\n\n")
+		}
+
+		filesContent.WriteString("\nAnalyze the content and return a JSON object with relationships:\n")
+		filesContent.WriteString(`{
+  "relationships": {
+    "capabilityDependencies": [
+      {"from": "CAP-001", "to": "CAP-002"}
+    ],
+    "enablerAssignments": [
+      {"enablerId": "ENB-001", "capabilityId": "CAP-001"}
+    ]
+  }
+}
+
+Rules:
+1. capabilityDependencies: List which capabilities depend on other capabilities (from depends on to)
+2. enablerAssignments: Assign each enabler to its parent capability based on content
+3. Look for mentions of dependencies, relationships, or parent capabilities in the content
+
+Return ONLY the JSON object.`)
+
+		// Create Anthropic client and call API for relationships
+		client := NewAnthropicClient(req.AnthropicKey)
+		response, err := client.SendMessage(r.Context(), filesContent.String())
+		if err != nil {
+			// If AI fails, return pre-created items without relationships
+			fmt.Printf("[Analyze] AI relationship analysis failed: %v, returning pre-created items\n", err)
+			result := AnalyzeSpecificationsResponse{
+				Capabilities: preCapabilities,
+				Enablers:     preEnablers,
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(result)
+			return
+		}
+
+		// Parse relationships from AI response
+		jsonStart := strings.Index(response, "{")
+		jsonEnd := strings.LastIndex(response, "}")
+		if jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart {
+			jsonStr := response[jsonStart : jsonEnd+1]
+			var relResult struct {
+				Relationships struct {
+					CapabilityDependencies []struct {
+						From string `json:"from"`
+						To   string `json:"to"`
+					} `json:"capabilityDependencies"`
+					EnablerAssignments []struct {
+						EnablerID    string `json:"enablerId"`
+						CapabilityID string `json:"capabilityId"`
+					} `json:"enablerAssignments"`
+				} `json:"relationships"`
+			}
+
+			if err := json.Unmarshal([]byte(jsonStr), &relResult); err == nil {
+				// Apply dependencies to capabilities
+				for _, dep := range relResult.Relationships.CapabilityDependencies {
+					for i := range preCapabilities {
+						if preCapabilities[i].ID == dep.From {
+							preCapabilities[i].DownstreamImpacts = append(preCapabilities[i].DownstreamImpacts, dep.To)
+						}
+						if preCapabilities[i].ID == dep.To {
+							preCapabilities[i].UpstreamDependencies = append(preCapabilities[i].UpstreamDependencies, dep.From)
+						}
+					}
+				}
+
+				// Apply enabler assignments
+				for _, assign := range relResult.Relationships.EnablerAssignments {
+					for i := range preEnablers {
+						if preEnablers[i].ID == assign.EnablerID {
+							preEnablers[i].CapabilityID = assign.CapabilityID
+							// Also add to capability's enablers list
+							for j := range preCapabilities {
+								if preCapabilities[j].ID == assign.CapabilityID {
+									preCapabilities[j].Enablers = append(preCapabilities[j].Enablers, assign.EnablerID)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Return pre-created items with relationships
+		result := AnalyzeSpecificationsResponse{
+			Capabilities: preCapabilities,
+			Enablers:     preEnablers,
+		}
+
+		fmt.Printf("[Analyze] Final result: %d capabilities, %d enablers\n", len(result.Capabilities), len(result.Enablers))
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+
+	// Fall back to original full AI analysis if no CAP/ENB files found
+	// Create Anthropic client
+	client := NewAnthropicClient(req.AnthropicKey)
+
+	// Prepare the prompt for Claude
+	var filesContent strings.Builder
+	filesContent.WriteString("Analyze the following specification files. IMPORTANT: Create a capability entry for EACH file provided.\n\n")
+	filesContent.WriteString("Each markdown file represents either a capability, feature, or enabler.\n\n")
+
+	// List all files first
+	filesContent.WriteString("FILES TO PROCESS (create one capability/enabler for each):\n")
+	for i, file := range req.Files {
+		filesContent.WriteString(fmt.Sprintf("%d. %s\n", i+1, file.Filename))
+	}
+	filesContent.WriteString("\n")
+
+	for _, file := range req.Files {
+		filesContent.WriteString(fmt.Sprintf("=== File: %s ===\n", file.Filename))
+		filesContent.WriteString(file.Content)
+		filesContent.WriteString("\n\n")
+	}
+
+	filesContent.WriteString(fmt.Sprintf("\nIMPORTANT: You MUST create exactly %d capabilities/enablers - one for each file listed above.\n\n", len(req.Files)))
+	filesContent.WriteString("Please extract and return a JSON object with the following structure:\n")
+	filesContent.WriteString(`{
+  "capabilities": [
+    {
+      "id": "CAP-XXXXXX",
+      "name": "Capability Name (from file title or first heading)",
+      "status": "Implemented/Planned/In Progress/etc",
+      "type": "Capability",
+      "enablers": ["ENB-XXXXXX", ...],
+      "upstreamDependencies": ["CAP-XXXXXX", ...],
+      "downstreamImpacts": ["CAP-XXXXXX", ...]
+    }
+  ],
+  "enablers": [
+    {
+      "id": "ENB-XXXXXX",
+      "name": "Enabler Name",
+      "capabilityId": "CAP-XXXXXX",
+      "status": "Implemented/Planned/etc",
+      "type": "Enabler"
+    }
+  ]
+}
+
+Rules:
+1. Create ONE entry for EACH file - do not skip any files
+2. If a file has "enabler" in the name or content, add it to enablers array
+3. Otherwise, add it to capabilities array
+4. Extract the name from the first # heading or the filename
+5. Extract status from metadata if present, otherwise use "Planned"
+6. Look for dependencies and enablers mentioned in the content
+7. Generate unique IDs like CAP-001, CAP-002 for capabilities and ENB-001, ENB-002 for enablers
+
+Return ONLY the JSON object, no additional text.`)
+
+	// Call Claude API
+	response, err := client.SendMessage(r.Context(), filesContent.String())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to analyze specifications: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Parse Claude's response as JSON
+	var analysisResult AnalyzeSpecificationsResponse
+	if err := json.Unmarshal([]byte(response), &analysisResult); err != nil {
+		// If direct parsing fails, try to extract JSON from the response
+		jsonStart := strings.Index(response, "{")
+		jsonEnd := strings.LastIndex(response, "}")
+		if jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart {
+			jsonStr := response[jsonStart : jsonEnd+1]
+			if err := json.Unmarshal([]byte(jsonStr), &analysisResult); err != nil {
+				http.Error(w, fmt.Sprintf("failed to parse Claude response: %v", err), http.StatusInternalServerError)
+				return
+			}
+		} else {
+			http.Error(w, fmt.Sprintf("failed to parse Claude response: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Fallback: Ensure all files are represented as capabilities
+	// Build a map of existing capability/enabler names for quick lookup
+	existingNames := make(map[string]bool)
+	for _, cap := range analysisResult.Capabilities {
+		existingNames[strings.ToLower(cap.Name)] = true
+	}
+	for _, enb := range analysisResult.Enablers {
+		existingNames[strings.ToLower(enb.Name)] = true
+	}
+
+	// Check each file and add missing ones as capabilities
+	for i, file := range req.Files {
+		// Extract name from filename (remove extension and convert dashes/underscores to spaces)
+		baseName := strings.TrimSuffix(file.Filename, ".md")
+		displayName := strings.ReplaceAll(baseName, "-", " ")
+		displayName = strings.ReplaceAll(displayName, "_", " ")
+		displayName = strings.Title(displayName)
+
+		// Try to extract name from first heading in content
+		lines := strings.Split(file.Content, "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "# ") {
+				displayName = strings.TrimPrefix(line, "# ")
+				displayName = strings.TrimSpace(displayName)
+				break
+			}
+		}
+
+		// Check if this file is already represented
+		if !existingNames[strings.ToLower(displayName)] && !existingNames[strings.ToLower(baseName)] {
+			// Add as a capability
+			capID := fmt.Sprintf("CAP-%03d", len(analysisResult.Capabilities)+1)
+
+			// Try to extract status from content
+			status := "Planned"
+			for _, line := range lines {
+				lowerLine := strings.ToLower(line)
+				if strings.Contains(lowerLine, "status") {
+					if strings.Contains(lowerLine, "implemented") || strings.Contains(lowerLine, "complete") {
+						status = "Implemented"
+					} else if strings.Contains(lowerLine, "progress") {
+						status = "In Progress"
+					}
+					break
+				}
+			}
+
+			analysisResult.Capabilities = append(analysisResult.Capabilities, CapabilitySpec{
+				ID:                   capID,
+				Name:                 displayName,
+				Status:               status,
+				Type:                 "Capability",
+				Enablers:             []string{},
+				UpstreamDependencies: []string{},
+				DownstreamImpacts:    []string{},
+			})
+			fmt.Printf("[Analyze] Added missing capability from file %d: %s -> %s\n", i+1, file.Filename, displayName)
+		}
+	}
+
+	fmt.Printf("[Analyze] Final result: %d capabilities, %d enablers from %d files\n",
+		len(analysisResult.Capabilities), len(analysisResult.Enablers), len(req.Files))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(analysisResult)
+}
+
+// GenerateDiagramRequest represents the request for generating diagrams
+type GenerateDiagramRequest struct {
+	Files        []SpecificationFile `json:"files"`
+	AnthropicKey string              `json:"anthropic_key"`
+	DiagramType  string              `json:"diagram_type"`
+	Prompt       string              `json:"prompt"`
+}
+
+// GenerateDiagramResponse represents the generated diagram
+type GenerateDiagramResponse struct {
+	Diagram     string `json:"diagram"`
+	DiagramType string `json:"diagram_type"`
+}
+
+// HandleGenerateDiagram handles POST /specifications/generate-diagram
+func (h *Handler) HandleGenerateDiagram(w http.ResponseWriter, r *http.Request) {
+	var req GenerateDiagramRequest
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Files) == 0 {
+		http.Error(w, "files are required", http.StatusBadRequest)
+		return
+	}
+
+	if req.AnthropicKey == "" {
+		http.Error(w, "anthropic_key is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.DiagramType == "" {
+		http.Error(w, "diagram_type is required", http.StatusBadRequest)
+		return
+	}
+
+	// Create Anthropic client
+	client := NewAnthropicClient(req.AnthropicKey)
+
+	// Prepare the prompt for Claude
+	var filesContent strings.Builder
+	filesContent.WriteString("Here are the specification files for a software system:\n\n")
+
+	for _, file := range req.Files {
+		filesContent.WriteString(fmt.Sprintf("=== File: %s ===\n", file.Filename))
+		filesContent.WriteString(file.Content)
+		filesContent.WriteString("\n\n")
+	}
+
+	filesContent.WriteString("\n")
+	filesContent.WriteString(req.Prompt)
+
+	// Call Claude API
+	response, err := client.SendMessage(r.Context(), filesContent.String())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to generate diagram: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Clean up the response - extract just the Mermaid code
+	diagram := response
+
+	// Try to extract Mermaid code block if present
+	if strings.Contains(response, "```mermaid") {
+		start := strings.Index(response, "```mermaid")
+		if start != -1 {
+			start += len("```mermaid")
+			end := strings.Index(response[start:], "```")
+			if end != -1 {
+				diagram = strings.TrimSpace(response[start : start+end])
+			}
+		}
+	} else if strings.Contains(response, "```") {
+		// Try generic code block
+		start := strings.Index(response, "```")
+		if start != -1 {
+			start += 3
+			// Skip language identifier if present
+			newlineIdx := strings.Index(response[start:], "\n")
+			if newlineIdx != -1 {
+				start += newlineIdx + 1
+			}
+			end := strings.Index(response[start:], "```")
+			if end != -1 {
+				diagram = strings.TrimSpace(response[start : start+end])
+			}
+		}
+	}
+
+	result := GenerateDiagramResponse{
+		Diagram:     diagram,
+		DiagramType: req.DiagramType,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// AnalyzeApplicationRequest represents the request for analyzing an application
+type AnalyzeApplicationRequest struct {
+	WorkspacePath string `json:"workspacePath"`
+	APIKey        string `json:"apiKey"`
+	AIPreset      int    `json:"aiPreset"`
+	Prompt        string `json:"prompt"`
+}
+
+// AnalyzeApplicationResponse represents the response from application analysis
+type AnalyzeApplicationResponse struct {
+	Response string `json:"response"`
+	Error    string `json:"error,omitempty"`
+}
+
+// HandleAnalyzeApplication handles POST /analyze-application
+func (h *Handler) HandleAnalyzeApplication(w http.ResponseWriter, r *http.Request) {
+	var req AnalyzeApplicationRequest
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(AnalyzeApplicationResponse{Error: "workspacePath is required"})
+		return
+	}
+
+	if req.APIKey == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(AnalyzeApplicationResponse{Error: "apiKey is required"})
+		return
+	}
+
+	if req.Prompt == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(AnalyzeApplicationResponse{Error: "prompt is required"})
+		return
+	}
+
+	// Read specification files from the workspace
+	specsPath := filepath.Join(req.WorkspacePath, "specifications")
+	assetsPath := filepath.Join(req.WorkspacePath, "assets")
+	var specsContent strings.Builder
+	specsContent.WriteString("=== Specification Files ===\n\n")
+
+	filepath.Walk(specsPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip files we can't read
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".md") {
+			content, readErr := os.ReadFile(path)
+			if readErr == nil {
+				specsContent.WriteString(fmt.Sprintf("=== File: %s ===\n", info.Name()))
+				specsContent.WriteString(string(content))
+				specsContent.WriteString("\n\n")
+			}
+		}
+		return nil
+	})
+
+	// Collect images from specifications and assets folders
+	var images []ImageData
+	imageExtensions := map[string]string{
+		".png":  "image/png",
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".gif":  "image/gif",
+		".webp": "image/webp",
+	}
+
+	// Helper function to collect images from a folder
+	collectImages := func(folderPath string) {
+		filepath.Walk(folderPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if info.IsDir() {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(info.Name()))
+			if mediaType, ok := imageExtensions[ext]; ok {
+				imgData, readErr := os.ReadFile(path)
+				if readErr == nil && len(imgData) < 20*1024*1024 { // Max 20MB per image
+					images = append(images, ImageData{
+						MediaType: mediaType,
+						Data:      base64.StdEncoding.EncodeToString(imgData),
+					})
+				}
+			}
+			return nil
+		})
+	}
+
+	// Collect images from both folders
+	collectImages(specsPath)
+	collectImages(assetsPath)
+
+	// Get workspace name from path
+	workspaceName := filepath.Base(req.WorkspacePath)
+
+	// Add format instructions for file creation
+	formatInstructions := fmt.Sprintf(`
+
+IMPORTANT: To create files and folders, use these exact XML tags:
+- To create a folder: <create_folder>./%s/path/to/folder</create_folder>
+- To create a file: <create_file path="./%s/path/to/file.md">file content here</create_file>
+
+The current workspace is "%s". All paths should be relative and include the workspace name.
+For example:
+- Specifications go in: ./%s/specifications/
+- Code goes in: ./%s/code/
+- Assets go in: ./%s/assets/
+
+Create all necessary markdown files for capabilities, storyboards, dependencies, etc.
+`, workspaceName, workspaceName, workspaceName, workspaceName, workspaceName, workspaceName)
+
+	// Build the full prompt
+	fullPrompt := fmt.Sprintf("%s%s\n\n%s", req.Prompt, formatInstructions, specsContent.String())
+
+	// Create Anthropic client and send request
+	client := NewAnthropicClient(req.APIKey)
+	var response string
+	if len(images) > 0 {
+		// Use multimodal API with images
+		response, err = client.SendMessageWithImages(r.Context(), fullPrompt, images)
+	} else {
+		// Use text-only API
+		response, err = client.SendMessage(r.Context(), fullPrompt)
+	}
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(AnalyzeApplicationResponse{Error: fmt.Sprintf("failed to analyze application: %v", err)})
+		return
+	}
+
+	// Parse and execute file operations from Claude's response
+	filesCreated := 0
+	foldersCreated := 0
+
+	// Helper to resolve paths - strips ./ and workspace name prefix
+	resolvePath := func(path string) string {
+		path = strings.TrimSpace(path)
+		// Strip ./ prefix
+		if strings.HasPrefix(path, "./") {
+			path = path[2:]
+		}
+		// Strip workspace name prefix if present (e.g., "qamera/specifications" -> "specifications")
+		if strings.HasPrefix(path, workspaceName+"/") {
+			path = path[len(workspaceName)+1:]
+		}
+		return filepath.Join(req.WorkspacePath, path)
+	}
+
+	// Parse <create_folder>path</create_folder> tags
+	folderRegex := regexp.MustCompile(`<create_folder>([^<]+)</create_folder>`)
+	folderMatches := folderRegex.FindAllStringSubmatch(response, -1)
+	for _, match := range folderMatches {
+		if len(match) > 1 {
+			folderPath := resolvePath(match[1])
+			if err := os.MkdirAll(folderPath, 0755); err == nil {
+				foldersCreated++
+			}
+		}
+	}
+
+	// Parse <create_file path="...">content</create_file> tags
+	fileRegex := regexp.MustCompile(`(?s)<create_file\s+path="([^"]+)">(.*?)</create_file>`)
+	fileMatches := fileRegex.FindAllStringSubmatch(response, -1)
+	for _, match := range fileMatches {
+		if len(match) > 2 {
+			filePath := resolvePath(match[1])
+			content := match[2]
+			// Ensure parent directory exists
+			if err := os.MkdirAll(filepath.Dir(filePath), 0755); err == nil {
+				if err := os.WriteFile(filePath, []byte(content), 0644); err == nil {
+					filesCreated++
+				}
+			}
+		}
+	}
+
+	// Add summary to response
+	summary := fmt.Sprintf("\n\n--- Analysis Complete ---\nFolders created: %d\nFiles created: %d", foldersCreated, filesCreated)
+	response = response + summary
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(AnalyzeApplicationResponse{Response: response})
+}
+
+// ExportIdeationRequest represents the request for exporting ideation to markdown
+type ExportIdeationRequest struct {
+	WorkspacePath string `json:"workspacePath"`
+	Cards         []struct {
+		ID      string   `json:"id"`
+		Name    string   `json:"name"`
+		Content string   `json:"content"`
+		Tags    []string `json:"tags"`
+		Images  []struct {
+			ID  string `json:"id"`
+			URL string `json:"url"`
+		} `json:"images"`
+	} `json:"cards"`
+	Connections []struct {
+		From     string `json:"from"`
+		To       string `json:"to"`
+		FromName string `json:"fromName"`
+		ToName   string `json:"toName"`
+	} `json:"connections"`
+	Images []struct {
+		ID   string   `json:"id"`
+		URL  string   `json:"url"`
+		Tags []string `json:"tags"`
+	} `json:"images"`
+}
+
+// ExportIdeationResponse represents the export result
+type ExportIdeationResponse struct {
+	FilesCreated  int    `json:"filesCreated"`
+	AssetsCreated int    `json:"assetsCreated"`
+	Error         string `json:"error,omitempty"`
+}
+
+// HandleExportIdeation handles POST /export-ideation
+func (h *Handler) HandleExportIdeation(w http.ResponseWriter, r *http.Request) {
+	var req ExportIdeationRequest
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ExportIdeationResponse{Error: "workspacePath is required"})
+		return
+	}
+
+	// Create specifications and assets directories
+	specsPath := filepath.Join(req.WorkspacePath, "specifications")
+	assetsPath := filepath.Join(req.WorkspacePath, "assets")
+
+	if err := os.MkdirAll(specsPath, 0755); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ExportIdeationResponse{Error: fmt.Sprintf("failed to create specifications folder: %v", err)})
+		return
+	}
+
+	if err := os.MkdirAll(assetsPath, 0755); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ExportIdeationResponse{Error: fmt.Sprintf("failed to create assets folder: %v", err)})
+		return
+	}
+
+	filesCreated := 0
+	assetsCreated := 0
+
+	// Build dependency map
+	dependencyMap := make(map[string][]string) // id -> list of dependent card names
+	dependsOnMap := make(map[string][]string)  // id -> list of cards it depends on
+
+	for _, conn := range req.Connections {
+		dependencyMap[conn.From] = append(dependencyMap[conn.From], conn.ToName)
+		dependsOnMap[conn.To] = append(dependsOnMap[conn.To], conn.FromName)
+	}
+
+	// Export each card as a markdown file
+	for _, card := range req.Cards {
+		// Sanitize filename
+		safeName := strings.ReplaceAll(card.Name, " ", "-")
+		safeName = strings.ReplaceAll(safeName, "/", "-")
+		safeName = strings.ReplaceAll(safeName, "\\", "-")
+		filename := fmt.Sprintf("%s.md", safeName)
+		filePath := filepath.Join(specsPath, filename)
+
+		// Build markdown content
+		var md strings.Builder
+		md.WriteString(fmt.Sprintf("# %s\n\n", card.Name))
+
+		// Tags
+		if len(card.Tags) > 0 {
+			md.WriteString("## Tags\n")
+			for _, tag := range card.Tags {
+				md.WriteString(fmt.Sprintf("- %s\n", tag))
+			}
+			md.WriteString("\n")
+		}
+
+		// Content
+		md.WriteString("## Content\n\n")
+		md.WriteString(card.Content)
+		md.WriteString("\n\n")
+
+		// Dependencies (what this card leads to)
+		if deps, ok := dependencyMap[card.ID]; ok && len(deps) > 0 {
+			md.WriteString("## Leads To\n")
+			for _, dep := range deps {
+				md.WriteString(fmt.Sprintf("- [[%s]]\n", dep))
+			}
+			md.WriteString("\n")
+		}
+
+		// Depends on (what this card depends on)
+		if deps, ok := dependsOnMap[card.ID]; ok && len(deps) > 0 {
+			md.WriteString("## Depends On\n")
+			for _, dep := range deps {
+				md.WriteString(fmt.Sprintf("- [[%s]]\n", dep))
+			}
+			md.WriteString("\n")
+		}
+
+		// Images in card
+		if len(card.Images) > 0 {
+			md.WriteString("## Images\n")
+			for _, img := range card.Images {
+				imgFilename := fmt.Sprintf("%s-%s.png", safeName, img.ID)
+				md.WriteString(fmt.Sprintf("![%s](../assets/%s)\n", img.ID, imgFilename))
+			}
+			md.WriteString("\n")
+		}
+
+		// Write markdown file
+		if err := os.WriteFile(filePath, []byte(md.String()), 0644); err != nil {
+			continue
+		}
+		filesCreated++
+	}
+
+	// Export standalone images
+	for _, img := range req.Images {
+		// Create a markdown for the image
+		safeName := fmt.Sprintf("Image-%s", img.ID)
+		filename := fmt.Sprintf("%s.md", safeName)
+		filePath := filepath.Join(specsPath, filename)
+
+		var md strings.Builder
+		md.WriteString(fmt.Sprintf("# %s\n\n", safeName))
+
+		if len(img.Tags) > 0 {
+			md.WriteString("## Tags\n")
+			for _, tag := range img.Tags {
+				md.WriteString(fmt.Sprintf("- %s\n", tag))
+			}
+			md.WriteString("\n")
+		}
+
+		md.WriteString("## Image\n")
+		imgFilename := fmt.Sprintf("%s.png", safeName)
+		md.WriteString(fmt.Sprintf("![%s](../assets/%s)\n", safeName, imgFilename))
+
+		// Dependencies
+		if deps, ok := dependencyMap[img.ID]; ok && len(deps) > 0 {
+			md.WriteString("\n## Leads To\n")
+			for _, dep := range deps {
+				md.WriteString(fmt.Sprintf("- [[%s]]\n", dep))
+			}
+		}
+
+		if deps, ok := dependsOnMap[img.ID]; ok && len(deps) > 0 {
+			md.WriteString("\n## Depends On\n")
+			for _, dep := range deps {
+				md.WriteString(fmt.Sprintf("- [[%s]]\n", dep))
+			}
+		}
+
+		if err := os.WriteFile(filePath, []byte(md.String()), 0644); err != nil {
+			continue
+		}
+		filesCreated++
+		assetsCreated++ // Count as asset placeholder
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ExportIdeationResponse{
+		FilesCreated:  filesCreated,
+		AssetsCreated: assetsCreated,
+	})
+}
+
+// ListFoldersRequest represents request for listing folders
+type ListFoldersRequest struct {
+	Path string `json:"path"`
+}
+
+// FolderItem represents a folder or file
+type FolderItem struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	IsDir bool   `json:"isDir"`
+}
+
+// ListFoldersResponse represents the folder listing response
+type ListFoldersResponse struct {
+	Items       []FolderItem `json:"items"`
+	CurrentPath string       `json:"currentPath"`
+	ParentPath  string       `json:"parentPath"`
+}
+
+// HandleListFolders handles GET /folders/list
+func (h *Handler) HandleListFolders(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		path = "workspaces"
+	}
+
+	// Ensure path is within workspaces directory for security
+	if !strings.HasPrefix(path, "workspaces") {
+		http.Error(w, "path must be within workspaces directory", http.StatusBadRequest)
+		return
+	}
+
+	// Check if directory exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		http.Error(w, fmt.Sprintf("directory not found: %s", path), http.StatusNotFound)
+		return
+	}
+
+	// Read directory
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to read directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var items []FolderItem
+	for _, entry := range entries {
+		// Skip hidden files
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		items = append(items, FolderItem{
+			Name:  entry.Name(),
+			Path:  filepath.Join(path, entry.Name()),
+			IsDir: entry.IsDir(),
+		})
+	}
+
+	// Get parent path
+	parentPath := filepath.Dir(path)
+	if parentPath == "." || !strings.HasPrefix(parentPath, "workspaces") {
+		parentPath = ""
+	}
+
+	response := ListFoldersResponse{
+		Items:       items,
+		CurrentPath: path,
+		ParentPath:  parentPath,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// CreateFolderRequest represents request for creating a folder
+type CreateFolderRequest struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+}
+
+// HandleCreateFolder handles POST /folders/create
+func (h *Handler) HandleCreateFolder(w http.ResponseWriter, r *http.Request) {
+	var req CreateFolderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" || req.Name == "" {
+		http.Error(w, "path and name are required", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure path is within workspaces directory for security
+	if !strings.HasPrefix(req.Path, "workspaces") {
+		http.Error(w, "path must be within workspaces directory", http.StatusBadRequest)
+		return
+	}
+
+	// Create the full folder path
+	fullPath := filepath.Join(req.Path, req.Name)
+
+	// Create the folder
+	if err := os.MkdirAll(fullPath, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("failed to create folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Also create a specifications subfolder
+	specsPath := filepath.Join(fullPath, "specifications")
+	if err := os.MkdirAll(specsPath, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("failed to create specifications folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := FolderItem{
+		Name:  req.Name,
+		Path:  fullPath,
+		IsDir: true,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// EnsureWorkspaceStructureRequest represents request for ensuring workspace folder structure
+type EnsureWorkspaceStructureRequest struct {
+	Path string `json:"path"`
+}
+
+// EnsureWorkspaceStructureResponse represents the response with created folders
+type EnsureWorkspaceStructureResponse struct {
+	Success        bool     `json:"success"`
+	Path           string   `json:"path"`
+	CreatedFolders []string `json:"created_folders"`
+	ExistingFolders []string `json:"existing_folders"`
+}
+
+// HandleEnsureWorkspaceStructure handles POST /folders/ensure-workspace-structure
+// Creates all required workspace subfolders if they don't exist
+func (h *Handler) HandleEnsureWorkspaceStructure(w http.ResponseWriter, r *http.Request) {
+	var req EnsureWorkspaceStructureRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure path is within workspaces directory for security
+	if !strings.HasPrefix(req.Path, "workspaces") {
+		http.Error(w, "path must be within workspaces directory", http.StatusBadRequest)
+		return
+	}
+
+	// Define the required workspace subfolders
+	requiredFolders := []string{
+		"conception",
+		"definition",
+		"design",
+		"implementation",
+		"assets",
+		"code",
+		"deploy",
+		"scripts",
+		"AI_Principles",
+		"UI_Design",
+		"specifications", // Keep specifications folder as it was already being created
+	}
+
+	var createdFolders []string
+	var existingFolders []string
+
+	// Ensure the main workspace folder exists
+	if err := os.MkdirAll(req.Path, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("failed to create workspace folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Create each subfolder if it doesn't exist
+	for _, folder := range requiredFolders {
+		folderPath := filepath.Join(req.Path, folder)
+
+		// Check if folder exists
+		if _, err := os.Stat(folderPath); os.IsNotExist(err) {
+			// Create the folder
+			if err := os.MkdirAll(folderPath, 0755); err != nil {
+				http.Error(w, fmt.Sprintf("failed to create folder %s: %v", folder, err), http.StatusInternalServerError)
+				return
+			}
+			createdFolders = append(createdFolders, folder)
+		} else {
+			existingFolders = append(existingFolders, folder)
+		}
+	}
+
+	response := EnsureWorkspaceStructureResponse{
+		Success:        true,
+		Path:           req.Path,
+		CreatedFolders: createdFolders,
+		ExistingFolders: existingFolders,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// CapabilityFilesRequest represents the request body for fetching capability files
+type CapabilityFilesRequest struct {
+	WorkspacePath string `json:"workspacePath"`
+}
+
+// FileCapability represents a capability parsed from a markdown file
+type FileCapability struct {
+	Filename    string            `json:"filename"`
+	Path        string            `json:"path"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Status      string            `json:"status"`
+	Content     string            `json:"content"`
+	Fields      map[string]string `json:"fields"`
+}
+
+// HandleCapabilityFiles handles POST /capability-files
+func (h *Handler) HandleCapabilityFiles(w http.ResponseWriter, r *http.Request) {
+	var req CapabilityFilesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		http.Error(w, "workspacePath is required", http.StatusBadRequest)
+		return
+	}
+
+	// Capability files are stored in the definition folder
+	// Handle both relative and absolute paths, and Docker volume mounts
+	workspacePath := req.WorkspacePath
+
+	// If path contains "workspaces/", extract the relative part
+	// This handles absolute host paths when running inside Docker containers
+	if idx := strings.Index(workspacePath, "workspaces/"); idx != -1 {
+		workspacePath = workspacePath[idx:]
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to get working directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+	specsPath := filepath.Join(cwd, workspacePath, "definition")
+
+	// Check if definition folder exists
+	if _, err := os.Stat(specsPath); os.IsNotExist(err) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"capabilities": []FileCapability{},
+		})
+		return
+	}
+
+	// Find capability files matching patterns: capability*, CAP*, capabilities*
+	var capabilities []FileCapability
+	patterns := []string{"capability", "CAP", "capabilities"}
+
+	err = filepath.Walk(specsPath, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return nil // Skip errors
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		// Check if file matches any pattern (case-insensitive)
+		filename := info.Name()
+		filenameUpper := strings.ToUpper(filename)
+		matched := false
+		for _, pattern := range patterns {
+			if strings.HasPrefix(filenameUpper, strings.ToUpper(pattern)) {
+				matched = true
+				break
+			}
+		}
+
+		if !matched {
+			return nil
+		}
+
+		// Only process markdown files
+		if !strings.HasSuffix(strings.ToLower(filename), ".md") {
+			return nil
+		}
+
+		// Read file content
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil // Skip files we can't read
+		}
+
+		// Parse the markdown to extract fields (may return multiple capabilities)
+		caps := parseMarkdownCapabilities(filename, path, string(content))
+
+		// If file contains multiple capabilities, split it into separate files
+		if len(caps) > 1 {
+			if err := splitMultiCapabilityFile(path, caps); err != nil {
+				// Log error but continue - we'll still return the parsed capabilities
+				fmt.Printf("Warning: failed to split multi-capability file %s: %v\n", path, err)
+			}
+			// Update paths for the split files
+			dir := filepath.Dir(path)
+			for i := range caps {
+				safeName := strings.ToLower(caps[i].Name)
+				safeName = strings.ReplaceAll(safeName, " ", "-")
+				safeName = strings.Map(func(r rune) rune {
+					if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+						return r
+					}
+					return -1
+				}, safeName)
+				if safeName == "" {
+					safeName = fmt.Sprintf("capability-%d", i)
+				}
+				caps[i].Filename = fmt.Sprintf("CAP-%s.md", safeName)
+				caps[i].Path = filepath.Join(dir, caps[i].Filename)
+			}
+		}
+
+		capabilities = append(capabilities, caps...)
+
+		return nil
+	})
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to scan specifications folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"capabilities": capabilities,
+	})
+}
+
+// FileEnabler represents an enabler parsed from a markdown file
+type FileEnabler struct {
+	Filename     string            `json:"filename"`
+	Path         string            `json:"path"`
+	Name         string            `json:"name"`
+	Purpose      string            `json:"purpose"`
+	Status       string            `json:"status"`
+	Owner        string            `json:"owner"`
+	Priority     string            `json:"priority"`
+	CapabilityID string            `json:"capabilityId"`
+	EnablerID    string            `json:"enablerId"`
+	Fields       map[string]string `json:"fields"`
+}
+
+// HandleEnablerFiles handles POST /enabler-files
+func (h *Handler) HandleEnablerFiles(w http.ResponseWriter, r *http.Request) {
+	var req CapabilityFilesRequest // Reuse the same request struct
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		http.Error(w, "workspacePath is required", http.StatusBadRequest)
+		return
+	}
+
+	// Enabler files are stored in the definition folder
+	// Handle both relative and absolute paths, and Docker volume mounts
+	workspacePath := req.WorkspacePath
+
+	// If path contains "workspaces/", extract the relative part
+	if idx := strings.Index(workspacePath, "workspaces/"); idx != -1 {
+		workspacePath = workspacePath[idx:]
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to get working directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+	specsPath := filepath.Join(cwd, workspacePath, "definition")
+
+	// Check if definition folder exists
+	if _, err := os.Stat(specsPath); os.IsNotExist(err) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"enablers": []FileEnabler{},
+		})
+		return
+	}
+
+	// Find enabler files matching patterns: ENB-*, enabler*
+	var enablers []FileEnabler
+	patterns := []string{"ENB-", "enabler"}
+
+	err = filepath.Walk(specsPath, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return nil // Skip errors
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		// Check if file matches any pattern (case-insensitive)
+		filename := info.Name()
+		filenameUpper := strings.ToUpper(filename)
+		matched := false
+		for _, pattern := range patterns {
+			if strings.HasPrefix(filenameUpper, strings.ToUpper(pattern)) {
+				matched = true
+				break
+			}
+		}
+
+		if !matched {
+			return nil
+		}
+
+		// Only process markdown files
+		if !strings.HasSuffix(strings.ToLower(filename), ".md") {
+			return nil
+		}
+
+		// Read file content
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil // Skip files we can't read
+		}
+
+		// Parse the markdown to extract enabler fields
+		enabler := parseMarkdownEnabler(filename, path, string(content))
+		enablers = append(enablers, enabler)
+
+		return nil
+	})
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to scan definition folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enablers": enablers,
+	})
+}
+
+// parseMarkdownEnabler parses a markdown file to extract enabler information
+func parseMarkdownEnabler(filename, path, content string) FileEnabler {
+	enabler := FileEnabler{
+		Filename: filename,
+		Path:     path,
+		Fields:   make(map[string]string),
+	}
+
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		// Extract title from first # heading
+		if strings.HasPrefix(trimmedLine, "# ") && enabler.Name == "" {
+			enabler.Name = strings.TrimPrefix(trimmedLine, "# ")
+			continue
+		}
+
+		// Parse metadata fields
+		// Handle various formats: **Field:** value, - **Field**: value, Field: value
+		if strings.HasPrefix(trimmedLine, "**ID**:") || strings.HasPrefix(trimmedLine, "- **ID**:") ||
+			strings.HasPrefix(trimmedLine, "**ID:**") || strings.HasPrefix(trimmedLine, "- **ID:**") {
+			id := trimmedLine
+			id = strings.TrimPrefix(id, "- ")
+			id = strings.TrimPrefix(id, "**ID**:")
+			id = strings.TrimPrefix(id, "**ID:**")
+			enabler.EnablerID = strings.TrimSpace(id)
+			enabler.Fields["ID"] = enabler.EnablerID
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "**Status**:") || strings.HasPrefix(trimmedLine, "- **Status**:") ||
+			strings.HasPrefix(trimmedLine, "**Status:**") || strings.HasPrefix(trimmedLine, "- **Status:**") {
+			status := trimmedLine
+			status = strings.TrimPrefix(status, "- ")
+			status = strings.TrimPrefix(status, "**Status**:")
+			status = strings.TrimPrefix(status, "**Status:**")
+			enabler.Status = strings.TrimSpace(status)
+			enabler.Fields["Status"] = enabler.Status
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "**Owner**:") || strings.HasPrefix(trimmedLine, "- **Owner**:") ||
+			strings.HasPrefix(trimmedLine, "**Owner:**") || strings.HasPrefix(trimmedLine, "- **Owner:**") {
+			owner := trimmedLine
+			owner = strings.TrimPrefix(owner, "- ")
+			owner = strings.TrimPrefix(owner, "**Owner**:")
+			owner = strings.TrimPrefix(owner, "**Owner:**")
+			enabler.Owner = strings.TrimSpace(owner)
+			enabler.Fields["Owner"] = enabler.Owner
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "**Priority**:") || strings.HasPrefix(trimmedLine, "- **Priority**:") ||
+			strings.HasPrefix(trimmedLine, "**Priority:**") || strings.HasPrefix(trimmedLine, "- **Priority:**") {
+			priority := trimmedLine
+			priority = strings.TrimPrefix(priority, "- ")
+			priority = strings.TrimPrefix(priority, "**Priority**:")
+			priority = strings.TrimPrefix(priority, "**Priority:**")
+			enabler.Priority = strings.TrimSpace(priority)
+			enabler.Fields["Priority"] = enabler.Priority
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "**Capability**:") || strings.HasPrefix(trimmedLine, "- **Capability**:") ||
+			strings.HasPrefix(trimmedLine, "**Capability:**") || strings.HasPrefix(trimmedLine, "- **Capability:**") {
+			cap := trimmedLine
+			cap = strings.TrimPrefix(cap, "- ")
+			cap = strings.TrimPrefix(cap, "**Capability**:")
+			cap = strings.TrimPrefix(cap, "**Capability:**")
+			cap = strings.TrimSpace(cap)
+			// Extract capability ID from format "Name (CAP-XXXXXX)"
+			if idx := strings.LastIndex(cap, "("); idx != -1 {
+				capId := strings.TrimSuffix(strings.TrimPrefix(cap[idx:], "("), ")")
+				enabler.CapabilityID = strings.TrimSpace(capId)
+			} else {
+				enabler.CapabilityID = cap
+			}
+			enabler.Fields["Capability"] = cap
+			continue
+		}
+	}
+
+	// Extract purpose from ## Purpose section
+	purposeIdx := strings.Index(content, "## Purpose")
+	if purposeIdx != -1 {
+		afterPurpose := content[purposeIdx+len("## Purpose"):]
+		nextSectionIdx := strings.Index(afterPurpose, "\n## ")
+		if nextSectionIdx == -1 {
+			nextSectionIdx = len(afterPurpose)
+		}
+		enabler.Purpose = strings.TrimSpace(afterPurpose[:nextSectionIdx])
+	}
+
+	// If no enabler ID found, extract from filename
+	if enabler.EnablerID == "" && strings.HasPrefix(strings.ToUpper(filename), "ENB-") {
+		parts := strings.SplitN(filename, "-", 3)
+		if len(parts) >= 2 {
+			enabler.EnablerID = "ENB-" + parts[1]
+		}
+	}
+
+	return enabler
+}
+
+// SaveCapabilityRequest represents the request to save a capability file
+type SaveCapabilityRequest struct {
+	Path        string `json:"path"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+	Content     string `json:"content"`
+}
+
+// HandleSaveCapability handles POST /save-capability
+func (h *Handler) HandleSaveCapability(w http.ResponseWriter, r *http.Request) {
+	var req SaveCapabilityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	// Build the markdown content
+	var content strings.Builder
+	content.WriteString(fmt.Sprintf("# %s\n\n", req.Name))
+
+	if req.Status != "" {
+		content.WriteString(fmt.Sprintf("**Status:** %s\n\n", req.Status))
+	}
+
+	if req.Description != "" {
+		content.WriteString(fmt.Sprintf("**Description:** %s\n\n", req.Description))
+	}
+
+	// Append any additional content, but strip existing Status and Description lines
+	// to avoid duplication
+	if req.Content != "" {
+		cleanedContent := stripMetadataFromContent(req.Content)
+		if cleanedContent != "" {
+			content.WriteString(cleanedContent)
+		}
+	}
+
+	// Write to file
+	if err := os.WriteFile(req.Path, []byte(content.String()), 0644); err != nil {
+		http.Error(w, fmt.Sprintf("failed to save file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Capability saved successfully",
+	})
+}
+
+// DeleteCapabilityRequest represents the request to delete a capability file
+type DeleteCapabilityRequest struct {
+	Path string `json:"path"`
+}
+
+// HandleDeleteCapability handles POST /delete-capability
+func (h *Handler) HandleDeleteCapability(w http.ResponseWriter, r *http.Request) {
+	var req DeleteCapabilityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify file exists
+	if _, err := os.Stat(req.Path); os.IsNotExist(err) {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+
+	// Delete the file
+	if err := os.Remove(req.Path); err != nil {
+		http.Error(w, fmt.Sprintf("failed to delete file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Capability deleted successfully",
+	})
+}
+
+// splitMultiCapabilityFile splits a file with multiple capabilities into separate files
+func splitMultiCapabilityFile(filePath string, capabilities []FileCapability) error {
+	if len(capabilities) <= 1 {
+		return nil // Nothing to split
+	}
+
+	dir := filepath.Dir(filePath)
+
+	// Create separate files for each capability
+	for _, cap := range capabilities {
+		// Generate filename from capability name
+		safeName := strings.ToLower(cap.Name)
+		safeName = strings.ReplaceAll(safeName, " ", "-")
+		// Remove special characters
+		safeName = strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+				return r
+			}
+			return -1
+		}, safeName)
+		if safeName == "" {
+			safeName = fmt.Sprintf("capability-%d", time.Now().UnixNano())
+		}
+		newFilePath := filepath.Join(dir, fmt.Sprintf("CAP-%s.md", safeName))
+
+		// Build markdown content
+		var content strings.Builder
+		content.WriteString(fmt.Sprintf("# %s\n\n", cap.Name))
+		if cap.Status != "" {
+			content.WriteString(fmt.Sprintf("**Status:** %s\n\n", cap.Status))
+		}
+		if cap.Description != "" {
+			content.WriteString(fmt.Sprintf("**Description:** %s\n\n", cap.Description))
+		}
+		// Add any remaining content
+		if cap.Content != "" {
+			content.WriteString(cap.Content)
+		}
+
+		// Write the new file
+		if err := os.WriteFile(newFilePath, []byte(content.String()), 0644); err != nil {
+			return err
+		}
+	}
+
+	// Delete the original file
+	if err := os.Remove(filePath); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// parseMarkdownCapabilities parses a markdown file to extract multiple capabilities
+// It splits on # or ## headings to find separate capabilities within the same file
+func parseMarkdownCapabilities(filename, path, content string) []FileCapability {
+	var capabilities []FileCapability
+	lines := strings.Split(content, "\n")
+
+	// Count # and ## headings to determine split strategy
+	h1Count := 0
+	h2Count := 0
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmedLine, "## ") {
+			h2Count++
+		} else if strings.HasPrefix(trimmedLine, "# ") {
+			h1Count++
+		}
+	}
+
+	// Determine which heading level to split on
+	// If there's only one # heading but multiple ## headings, split on ##
+	// Otherwise split on #
+	splitOnH2 := (h1Count <= 1 && h2Count > 1)
+
+	var capabilityBlocks []struct {
+		name    string
+		content []string
+	}
+
+	var currentBlock struct {
+		name    string
+		content []string
+	}
+
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		var isNewCapability bool
+		var capName string
+
+		if splitOnH2 {
+			// Split on ## headings
+			if strings.HasPrefix(trimmedLine, "## ") {
+				isNewCapability = true
+				capName = strings.TrimPrefix(trimmedLine, "## ")
+			}
+		} else {
+			// Split on # headings (but not ##)
+			if strings.HasPrefix(trimmedLine, "# ") && !strings.HasPrefix(trimmedLine, "## ") {
+				isNewCapability = true
+				capName = strings.TrimPrefix(trimmedLine, "# ")
+			}
+		}
+
+		if isNewCapability {
+			// Save previous block if it has content
+			if currentBlock.name != "" || len(currentBlock.content) > 0 {
+				capabilityBlocks = append(capabilityBlocks, currentBlock)
+			}
+			// Start new block
+			currentBlock = struct {
+				name    string
+				content []string
+			}{
+				name:    capName,
+				content: []string{},
+			}
+		} else {
+			currentBlock.content = append(currentBlock.content, line)
+		}
+	}
+
+	// Save last block
+	if currentBlock.name != "" || len(currentBlock.content) > 0 {
+		capabilityBlocks = append(capabilityBlocks, currentBlock)
+	}
+
+	// Filter out empty blocks (content before first heading)
+	var filteredBlocks []struct {
+		name    string
+		content []string
+	}
+	for _, block := range capabilityBlocks {
+		if block.name != "" {
+			filteredBlocks = append(filteredBlocks, block)
+		}
+	}
+
+	// If no named blocks found, treat entire file as single capability
+	if len(filteredBlocks) == 0 {
+		cap := parseSingleCapability(filename, path, content, "")
+		return []FileCapability{cap}
+	}
+
+	// Parse each block as a separate capability
+	for _, block := range filteredBlocks {
+		blockContent := strings.Join(block.content, "\n")
+		cap := parseSingleCapability(filename, path, blockContent, block.name)
+		capabilities = append(capabilities, cap)
+	}
+
+	return capabilities
+}
+
+// parseSingleCapability parses content for a single capability
+func parseSingleCapability(filename, path, content, name string) FileCapability {
+	cap := FileCapability{
+		Filename: filename,
+		Path:     path,
+		Content:  content,
+		Name:     name,
+		Fields:   make(map[string]string),
+	}
+
+	lines := strings.Split(content, "\n")
+	var currentSection string
+	var sectionContent []string
+
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		// Check for section headers (## heading)
+		if strings.HasPrefix(trimmedLine, "## ") {
+			// Save previous section
+			if currentSection != "" && len(sectionContent) > 0 {
+				cap.Fields[currentSection] = strings.TrimSpace(strings.Join(sectionContent, "\n"))
+			}
+			currentSection = strings.TrimPrefix(trimmedLine, "## ")
+			sectionContent = []string{}
+			continue
+		}
+
+		// Check for subsection headers (### heading)
+		if strings.HasPrefix(trimmedLine, "### ") {
+			// Save previous section
+			if currentSection != "" && len(sectionContent) > 0 {
+				cap.Fields[currentSection] = strings.TrimSpace(strings.Join(sectionContent, "\n"))
+			}
+			currentSection = strings.TrimPrefix(trimmedLine, "### ")
+			sectionContent = []string{}
+			continue
+		}
+
+		// Look for specific field patterns
+		// Handle various status formats: **Status:** value, Status: value, - **Status**: value
+		// Make pattern matching case-insensitive
+		trimmedLineLower := strings.ToLower(trimmedLine)
+		if strings.HasPrefix(trimmedLineLower, "**status:**") || strings.HasPrefix(trimmedLineLower, "**status**:") ||
+			strings.HasPrefix(trimmedLineLower, "status:") ||
+			strings.HasPrefix(trimmedLineLower, "- **status**:") || strings.HasPrefix(trimmedLineLower, "- **status:**") {
+			status := trimmedLine
+			status = strings.TrimPrefix(status, "- ")
+			// Remove all possible status prefixes (case-insensitive approach)
+			for _, prefix := range []string{"**Status:**", "**status:**", "**Status**:", "**status**:", "Status:", "status:"} {
+				if strings.HasPrefix(status, prefix) {
+					status = strings.TrimPrefix(status, prefix)
+					break
+				}
+			}
+			cap.Status = strings.TrimSpace(status)
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "**Description:**") || strings.HasPrefix(trimmedLine, "Description:") {
+			desc := strings.TrimPrefix(trimmedLine, "**Description:**")
+			desc = strings.TrimPrefix(desc, "Description:")
+			cap.Description = strings.TrimSpace(desc)
+			continue
+		}
+
+		// Add line to current section content
+		if currentSection != "" {
+			sectionContent = append(sectionContent, line)
+		} else if cap.Description == "" && trimmedLine != "" && !strings.HasPrefix(trimmedLine, "#") {
+			// Use first non-empty, non-header line as description if not set
+			cap.Description = trimmedLine
+		}
+	}
+
+	// Save last section
+	if currentSection != "" && len(sectionContent) > 0 {
+		cap.Fields[currentSection] = strings.TrimSpace(strings.Join(sectionContent, "\n"))
+	}
+
+	// Default name from filename if not found
+	if cap.Name == "" {
+		cap.Name = strings.TrimSuffix(filename, filepath.Ext(filename))
+	}
+
+	return cap
+}
+
+// stripMetadataFromContent removes Status and Description lines from content
+// to prevent duplication when saving
+func stripMetadataFromContent(content string) string {
+	lines := strings.Split(content, "\n")
+	var filteredLines []string
+
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+		trimmedLineLower := strings.ToLower(trimmedLine)
+
+		// Skip status lines
+		if strings.HasPrefix(trimmedLineLower, "**status:**") ||
+			strings.HasPrefix(trimmedLineLower, "**status**:") ||
+			strings.HasPrefix(trimmedLineLower, "status:") ||
+			strings.HasPrefix(trimmedLineLower, "- **status**:") ||
+			strings.HasPrefix(trimmedLineLower, "- **status:**") {
+			continue
+		}
+
+		// Skip description lines
+		if strings.HasPrefix(trimmedLineLower, "**description:**") ||
+			strings.HasPrefix(trimmedLineLower, "**description**:") ||
+			strings.HasPrefix(trimmedLineLower, "description:") {
+			continue
+		}
+
+		// Skip title lines (# heading)
+		if strings.HasPrefix(trimmedLine, "# ") && !strings.HasPrefix(trimmedLine, "## ") {
+			continue
+		}
+
+		filteredLines = append(filteredLines, line)
+	}
+
+	// Trim leading empty lines
+	result := strings.TrimSpace(strings.Join(filteredLines, "\n"))
+	return result
+}
+
+// StoryFilesRequest represents the request body for fetching story files
+type StoryFilesRequest struct {
+	WorkspacePath string `json:"workspacePath"`
+}
+
+// FileStory represents a story parsed from a markdown file
+type FileStory struct {
+	ID          string            `json:"id"`
+	Filename    string            `json:"filename"`
+	Path        string            `json:"path"`
+	Title       string            `json:"title"`
+	Description string            `json:"description"`
+	Status      string            `json:"status"`
+	Content     string            `json:"content"`
+	Fields      map[string]string `json:"fields"`
+	ImageUrl    string            `json:"imageUrl,omitempty"`
+}
+
+// HandleStoryFiles handles POST /story-files
+func (h *Handler) HandleStoryFiles(w http.ResponseWriter, r *http.Request) {
+	var req StoryFilesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		http.Error(w, "workspacePath is required", http.StatusBadRequest)
+		return
+	}
+
+	// Story files are stored in the conception folder
+	// Handle both relative and absolute paths, and Docker volume mounts
+	var specsPath string
+	workspacePath := req.WorkspacePath
+
+	// If path contains "workspaces/", extract the relative part
+	// This handles both absolute host paths and relative paths
+	if idx := strings.Index(workspacePath, "workspaces/"); idx != -1 {
+		workspacePath = workspacePath[idx:]
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to get working directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+	specsPath = filepath.Join(cwd, workspacePath, "conception")
+
+	// Check if conception folder exists
+	if _, err := os.Stat(specsPath); os.IsNotExist(err) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"stories": []FileStory{},
+		})
+		return
+	}
+
+	// Find story files matching patterns: story*, STORY*, SB-*
+	var stories []FileStory
+	patterns := []string{"story", "STORY", "SB-"}
+
+	err = filepath.Walk(specsPath, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return nil // Skip errors
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		// Check if file matches any pattern (case-insensitive)
+		filename := info.Name()
+		filenameUpper := strings.ToUpper(filename)
+		matched := false
+		for _, pattern := range patterns {
+			if strings.HasPrefix(filenameUpper, strings.ToUpper(pattern)) {
+				matched = true
+				break
+			}
+		}
+
+		if !matched {
+			return nil
+		}
+
+		// Only process markdown files
+		if !strings.HasSuffix(strings.ToLower(filename), ".md") {
+			return nil
+		}
+
+		// Read file content
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil // Skip files we can't read
+		}
+
+		// Parse the markdown to extract story information (may return multiple stories)
+		parsedStories := parseMultipleStories(filename, path, string(content))
+
+		// If file contains multiple stories, split it into separate files
+		if len(parsedStories) > 1 {
+			if err := splitMultiStoryFile(path, parsedStories); err != nil {
+				fmt.Printf("Warning: failed to split multi-story file %s: %v\n", path, err)
+			}
+			// Update paths for the split files
+			dir := filepath.Dir(path)
+			for i := range parsedStories {
+				safeName := strings.ToLower(parsedStories[i].Title)
+				safeName = strings.ReplaceAll(safeName, " ", "-")
+				safeName = strings.Map(func(r rune) rune {
+					if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+						return r
+					}
+					return -1
+				}, safeName)
+				if safeName == "" {
+					safeName = fmt.Sprintf("story-%d", i)
+				}
+				parsedStories[i].Filename = fmt.Sprintf("STORY-%s.md", safeName)
+				parsedStories[i].Path = filepath.Join(dir, parsedStories[i].Filename)
+			}
+		}
+
+		stories = append(stories, parsedStories...)
+
+		return nil
+	})
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to scan specifications folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"stories": stories,
+	})
+}
+
+// splitMultiStoryFile splits a file with multiple stories into separate files
+func splitMultiStoryFile(filePath string, stories []FileStory) error {
+	if len(stories) <= 1 {
+		return nil
+	}
+
+	dir := filepath.Dir(filePath)
+
+	for _, story := range stories {
+		safeName := strings.ToLower(story.Title)
+		safeName = strings.ReplaceAll(safeName, " ", "-")
+		safeName = strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+				return r
+			}
+			return -1
+		}, safeName)
+		if safeName == "" {
+			safeName = fmt.Sprintf("story-%d", time.Now().UnixNano())
+		}
+		newFilePath := filepath.Join(dir, fmt.Sprintf("STORY-%s.md", safeName))
+
+		var content strings.Builder
+		content.WriteString(fmt.Sprintf("# %s\n\n", story.Title))
+		if story.Status != "" {
+			content.WriteString(fmt.Sprintf("**Status:** %s\n\n", story.Status))
+		}
+		if story.Description != "" {
+			content.WriteString(fmt.Sprintf("**Description:** %s\n\n", story.Description))
+		}
+		if story.Content != "" {
+			content.WriteString(story.Content)
+		}
+
+		if err := os.WriteFile(newFilePath, []byte(content.String()), 0644); err != nil {
+			return err
+		}
+	}
+
+	return os.Remove(filePath)
+}
+
+// parseMultipleStories parses a markdown file to extract multiple stories
+func parseMultipleStories(filename, path, content string) []FileStory {
+	var stories []FileStory
+	lines := strings.Split(content, "\n")
+
+	// Count # headings to determine if there are multiple stories
+	h1Count := 0
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmedLine, "# ") && !strings.HasPrefix(trimmedLine, "## ") {
+			h1Count++
+		}
+	}
+
+	// Only split on # headings if there are multiple top-level stories
+	// Do NOT split on ## headings - those are sections within a single story
+	splitOnH2 := false // Never split on ## - sections are part of a single story
+
+	var storyBlocks []struct {
+		name    string
+		content []string
+	}
+
+	var currentBlock struct {
+		name    string
+		content []string
+	}
+
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		var isNewStory bool
+		var storyName string
+
+		if splitOnH2 {
+			if strings.HasPrefix(trimmedLine, "## ") {
+				isNewStory = true
+				storyName = strings.TrimPrefix(trimmedLine, "## ")
+			}
+		} else {
+			if strings.HasPrefix(trimmedLine, "# ") && !strings.HasPrefix(trimmedLine, "## ") {
+				isNewStory = true
+				storyName = strings.TrimPrefix(trimmedLine, "# ")
+			}
+		}
+
+		if isNewStory {
+			if currentBlock.name != "" || len(currentBlock.content) > 0 {
+				storyBlocks = append(storyBlocks, currentBlock)
+			}
+			currentBlock = struct {
+				name    string
+				content []string
+			}{
+				name:    storyName,
+				content: []string{},
+			}
+		} else {
+			currentBlock.content = append(currentBlock.content, line)
+		}
+	}
+
+	if currentBlock.name != "" || len(currentBlock.content) > 0 {
+		storyBlocks = append(storyBlocks, currentBlock)
+	}
+
+	// Filter out empty blocks
+	var filteredBlocks []struct {
+		name    string
+		content []string
+	}
+	for _, block := range storyBlocks {
+		if block.name != "" {
+			filteredBlocks = append(filteredBlocks, block)
+		}
+	}
+
+	if len(filteredBlocks) == 0 {
+		story := parseSingleStory(filename, path, content, "")
+		return []FileStory{story}
+	}
+
+	for _, block := range filteredBlocks {
+		blockContent := strings.Join(block.content, "\n")
+		story := parseSingleStory(filename, path, blockContent, block.name)
+		stories = append(stories, story)
+	}
+
+	return stories
+}
+
+// parseSingleStory parses content for a single story
+func parseSingleStory(filename, path, content, title string) FileStory {
+	story := FileStory{
+		ID:       fmt.Sprintf("file-%s-%d", strings.TrimSuffix(filename, filepath.Ext(filename)), time.Now().UnixNano()),
+		Filename: filename,
+		Path:     path,
+		Content:  content,
+		Title:    title,
+		Fields:   make(map[string]string),
+	}
+
+	lines := strings.Split(content, "\n")
+	var currentSection string
+	var sectionContent []string
+
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		// Check for section headers (## or ### heading)
+		if strings.HasPrefix(trimmedLine, "### ") {
+			if currentSection != "" && len(sectionContent) > 0 {
+				story.Fields[currentSection] = strings.TrimSpace(strings.Join(sectionContent, "\n"))
+			}
+			currentSection = strings.TrimPrefix(trimmedLine, "### ")
+			sectionContent = []string{}
+			continue
+		}
+
+		// Look for specific field patterns
+		if strings.HasPrefix(trimmedLine, "**Status:**") || strings.HasPrefix(trimmedLine, "Status:") {
+			status := strings.TrimPrefix(trimmedLine, "**Status:**")
+			status = strings.TrimPrefix(status, "Status:")
+			story.Status = strings.TrimSpace(status)
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "**Description:**") || strings.HasPrefix(trimmedLine, "Description:") {
+			desc := strings.TrimPrefix(trimmedLine, "**Description:**")
+			desc = strings.TrimPrefix(desc, "Description:")
+			story.Description = strings.TrimSpace(desc)
+			continue
+		}
+
+		// Add line to current section content
+		if currentSection != "" {
+			sectionContent = append(sectionContent, line)
+		} else if story.Description == "" && trimmedLine != "" && !strings.HasPrefix(trimmedLine, "#") {
+			story.Description = trimmedLine
+		}
+	}
+
+	if currentSection != "" && len(sectionContent) > 0 {
+		story.Fields[currentSection] = strings.TrimSpace(strings.Join(sectionContent, "\n"))
+	}
+
+	if story.Title == "" {
+		story.Title = strings.TrimSuffix(filename, filepath.Ext(filename))
+	}
+
+	if story.Status == "" {
+		story.Status = "pending"
+	}
+
+	return story
+}
+
+// IdeationFilesRequest represents the request body for fetching ideation files
+type IdeationFilesRequest struct {
+	WorkspacePath string `json:"workspacePath"`
+}
+
+// FileIdeation represents an ideation parsed from a markdown file
+type FileIdeation struct {
+	ID          string            `json:"id"`
+	Filename    string            `json:"filename"`
+	Path        string            `json:"path"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Status      string            `json:"status"`
+	Content     string            `json:"content"`
+	Fields      map[string]string `json:"fields"`
+	Tags        []string          `json:"tags,omitempty"`
+	LastModified string           `json:"lastModified,omitempty"`
+}
+
+// HandleIdeationFiles handles POST /ideation-files
+func (h *Handler) HandleIdeationFiles(w http.ResponseWriter, r *http.Request) {
+	var req IdeationFilesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		http.Error(w, "workspacePath is required", http.StatusBadRequest)
+		return
+	}
+
+	// Ideation files are stored in the conception folder
+	var specsPath string
+	workspacePath := req.WorkspacePath
+
+	// If path contains "workspaces/", extract the relative part
+	if idx := strings.Index(workspacePath, "workspaces/"); idx != -1 {
+		workspacePath = workspacePath[idx:]
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to get working directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+	specsPath = filepath.Join(cwd, workspacePath, "conception")
+
+	// Check if conception folder exists
+	if _, err := os.Stat(specsPath); os.IsNotExist(err) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ideas": []FileIdeation{},
+		})
+		return
+	}
+
+	// Find ideation files matching patterns: IDEA-*
+	var ideas []FileIdeation
+
+	err = filepath.Walk(specsPath, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return nil // Skip errors
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		// Match IDEA-*.md files
+		filename := info.Name()
+		if !strings.HasSuffix(strings.ToLower(filename), ".md") {
+			return nil
+		}
+
+		filenameUpper := strings.ToUpper(filename)
+		if !strings.HasPrefix(filenameUpper, "IDEA-") {
+			return nil
+		}
+
+		// Read and parse the file
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		idea := parseIdeationFile(filename, path, string(content))
+		idea.LastModified = info.ModTime().Format(time.RFC3339)
+		ideas = append(ideas, idea)
+
+		return nil
+	})
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to read ideation files: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ideas": ideas,
+	})
+}
+
+// parseIdeationFile parses a markdown file to extract ideation information
+func parseIdeationFile(filename, path, content string) FileIdeation {
+	idea := FileIdeation{
+		ID:       strings.TrimSuffix(filename, filepath.Ext(filename)),
+		Filename: filename,
+		Path:     path,
+		Content:  content,
+		Fields:   make(map[string]string),
+	}
+
+	lines := strings.Split(content, "\n")
+	var currentSection string
+	var sectionContent []string
+
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		// Parse # heading as name
+		if strings.HasPrefix(trimmedLine, "# ") && !strings.HasPrefix(trimmedLine, "## ") {
+			idea.Name = strings.TrimPrefix(trimmedLine, "# ")
+			continue
+		}
+
+		// Check for section headers (## heading)
+		if strings.HasPrefix(trimmedLine, "## ") {
+			if currentSection != "" && len(sectionContent) > 0 {
+				idea.Fields[currentSection] = strings.TrimSpace(strings.Join(sectionContent, "\n"))
+			}
+			currentSection = strings.TrimPrefix(trimmedLine, "## ")
+			sectionContent = []string{}
+			continue
+		}
+
+		// Parse metadata fields
+		if strings.HasPrefix(trimmedLine, "- **ID**:") || strings.HasPrefix(trimmedLine, "**ID:**") {
+			id := trimmedLine
+			id = strings.TrimPrefix(id, "- **ID**:")
+			id = strings.TrimPrefix(id, "- **ID:**")
+			id = strings.TrimPrefix(id, "**ID:**")
+			id = strings.TrimPrefix(id, "**ID**:")
+			idea.ID = strings.TrimSpace(id)
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "- **Status**:") || strings.HasPrefix(trimmedLine, "**Status:**") {
+			status := trimmedLine
+			status = strings.TrimPrefix(status, "- **Status**:")
+			status = strings.TrimPrefix(status, "- **Status:**")
+			status = strings.TrimPrefix(status, "**Status:**")
+			status = strings.TrimPrefix(status, "**Status**:")
+			idea.Status = strings.TrimSpace(status)
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "- **Tags**:") || strings.HasPrefix(trimmedLine, "**Tags:**") {
+			tagsStr := trimmedLine
+			tagsStr = strings.TrimPrefix(tagsStr, "- **Tags**:")
+			tagsStr = strings.TrimPrefix(tagsStr, "- **Tags:**")
+			tagsStr = strings.TrimPrefix(tagsStr, "**Tags:**")
+			tagsStr = strings.TrimPrefix(tagsStr, "**Tags**:")
+			tagsStr = strings.TrimSpace(tagsStr)
+			if tagsStr != "" {
+				tags := strings.Split(tagsStr, ",")
+				for i, tag := range tags {
+					tags[i] = strings.TrimSpace(tag)
+				}
+				idea.Tags = tags
+			}
+			continue
+		}
+
+		// Add line to current section content
+		if currentSection != "" {
+			sectionContent = append(sectionContent, line)
+		} else if idea.Description == "" && trimmedLine != "" && !strings.HasPrefix(trimmedLine, "#") && !strings.HasPrefix(trimmedLine, "-") {
+			idea.Description = trimmedLine
+		}
+	}
+
+	// Save last section
+	if currentSection != "" && len(sectionContent) > 0 {
+		idea.Fields[currentSection] = strings.TrimSpace(strings.Join(sectionContent, "\n"))
+	}
+
+	// Default name from filename if not found
+	if idea.Name == "" {
+		idea.Name = strings.TrimSuffix(filename, filepath.Ext(filename))
+	}
+
+	return idea
+}
+
+// AnalyzeStoryboardRequest represents the request for storyboard analysis
+type AnalyzeStoryboardRequest struct {
+	WorkspacePath string `json:"workspacePath"`
+	APIKey        string `json:"apiKey"`
+	ForceRegenerate bool   `json:"forceRegenerate"`
+}
+
+// StoryboardAnalysisResult represents the analyzed storyboard data
+type StoryboardAnalysisResult struct {
+	Cards       []AnalyzedCard       `json:"cards"`
+	Connections []AnalyzedConnection `json:"connections"`
+	Error       string               `json:"error,omitempty"`
+}
+
+// AnalyzedCard represents a card from the analysis
+type AnalyzedCard struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+	X           int    `json:"x"`
+	Y           int    `json:"y"`
+}
+
+// AnalyzedConnection represents a connection between cards
+type AnalyzedConnection struct {
+	ID   string `json:"id"`
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// HandleAnalyzeStoryboard handles POST /analyze-storyboard
+func (h *Handler) HandleAnalyzeStoryboard(w http.ResponseWriter, r *http.Request) {
+	var req AnalyzeStoryboardRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(StoryboardAnalysisResult{
+			Error: "invalid request body",
+		})
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(StoryboardAnalysisResult{
+			Error: "workspacePath is required",
+		})
+		return
+	}
+
+	specsPath := filepath.Join(req.WorkspacePath, "specifications")
+	fullPath := filepath.Join(specsPath, "storyboards-full.md")
+
+	// Check if storyboards-full.md exists and load from it (unless forcing regeneration)
+	if !req.ForceRegenerate {
+		if content, err := os.ReadFile(fullPath); err == nil {
+			// Parse the JSON from the file
+			contentStr := string(content)
+			jsonStart := strings.Index(contentStr, "```json")
+			jsonEnd := strings.Index(contentStr, "```\n")
+			if jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart {
+				jsonStr := contentStr[jsonStart+7 : jsonEnd]
+				var result StoryboardAnalysisResult
+				if err := json.Unmarshal([]byte(strings.TrimSpace(jsonStr)), &result); err == nil {
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(result)
+					return
+				}
+			}
+		}
+	}
+
+	// Need API key for regeneration
+	if req.APIKey == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(StoryboardAnalysisResult{
+			Error: "apiKey is required for analysis",
+		})
+		return
+	}
+
+	// Read the relevant markdown files
+	var filesContent strings.Builder
+	filesToRead := []string{
+		"storyboards.md", "storyboard.md", "stories.md",
+		"dependencies.md", "dependency.md",
+		"site-architecture.md", "architecture.md", "sitemap.md",
+	}
+
+	filesFound := 0
+	for _, filename := range filesToRead {
+		filePath := filepath.Join(specsPath, filename)
+		content, err := os.ReadFile(filePath)
+		if err == nil {
+			filesContent.WriteString(fmt.Sprintf("\n=== %s ===\n%s\n", filename, string(content)))
+			filesFound++
+		}
+	}
+
+	// Also read any STORY-*.md files
+	filepath.Walk(specsPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if strings.HasPrefix(strings.ToUpper(info.Name()), "STORY") && strings.HasSuffix(info.Name(), ".md") {
+			content, err := os.ReadFile(path)
+			if err == nil {
+				filesContent.WriteString(fmt.Sprintf("\n=== %s ===\n%s\n", info.Name(), string(content)))
+				filesFound++
+			}
+		}
+		return nil
+	})
+
+	if filesFound == 0 {
+		// Check if storyboards-full.md exists - if so, we should have loaded it earlier
+		// This means parsing failed, so return a helpful error
+		if _, err := os.Stat(fullPath); err == nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(StoryboardAnalysisResult{
+				Error: "storyboards-full.md exists but could not be parsed. Please check the file format or delete it to regenerate.",
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(StoryboardAnalysisResult{
+			Error: "No specification files found (STORY*.md, dependencies.md, site-architecture.md). Please add some specification files first.",
+		})
+		return
+	}
+
+	// Build the prompt for Claude
+	prompt := fmt.Sprintf(`Analyze the following markdown files and create a comprehensive storyboard diagram structure.
+
+Your task is to:
+1. Identify all distinct stories, features, or user flows
+2. Determine the dependencies and relationships between them
+3. Assign appropriate positions (x, y) for a clean flow diagram layout
+4. Determine the status of each item (pending, in-progress, or completed)
+
+IMPORTANT: Return ONLY valid JSON, no other text. The JSON must follow this exact structure:
+
+{
+  "cards": [
+    {
+      "id": "card-1",
+      "title": "Story Title",
+      "description": "Brief description of this story/feature",
+      "status": "pending",
+      "x": 100,
+      "y": 100
+    }
+  ],
+  "connections": [
+    {
+      "id": "conn-1-2",
+      "from": "card-1",
+      "to": "card-2"
+    }
+  ]
+}
+
+Layout Guidelines:
+- Start positions at x=100, y=100
+- Space cards horizontally by 400px for related items
+- Space cards vertically by 200px for sequential flow
+- Create a logical left-to-right, top-to-bottom flow
+- Group related features together
+- Entry points should be at the top/left
+- Terminal states should be at the bottom/right
+
+Status Guidelines:
+- "completed" - if marked as done/implemented
+- "in-progress" - if partially done or being worked on
+- "pending" - default for new/planned items
+
+Connection Guidelines:
+- Connect items that have dependencies
+- Connect sequential user flow steps
+- Connect parent features to child features
+- A connection means "from" must be done before "to" can start
+
+Here are the files to analyze:
+%s
+
+Remember: Return ONLY the JSON object, nothing else.`, filesContent.String())
+
+	// Call Claude API
+	client := NewAnthropicClient(req.APIKey)
+	response, err := client.SendMessage(r.Context(), prompt)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(StoryboardAnalysisResult{
+			Error: fmt.Sprintf("Failed to analyze with Claude: %v", err),
+		})
+		return
+	}
+
+	// Parse the JSON response from Claude
+	// Find the JSON in the response (in case Claude adds extra text)
+	jsonStart := strings.Index(response, "{")
+	jsonEnd := strings.LastIndex(response, "}")
+	if jsonStart == -1 || jsonEnd == -1 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(StoryboardAnalysisResult{
+			Error: "Claude did not return valid JSON",
+		})
+		return
+	}
+
+	jsonStr := response[jsonStart : jsonEnd+1]
+
+	var result StoryboardAnalysisResult
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(StoryboardAnalysisResult{
+			Error: fmt.Sprintf("Failed to parse Claude response: %v", err),
+		})
+		return
+	}
+
+	// Save the result to storyboards-full.md
+	var fullContent strings.Builder
+	fullContent.WriteString("# Generated Storyboard Analysis\n\n")
+	fullContent.WriteString(fmt.Sprintf("Generated: %s\n\n", time.Now().Format(time.RFC3339)))
+	fullContent.WriteString("## Storyboard Data (JSON)\n\n```json\n")
+
+	jsonBytes, _ := json.MarshalIndent(result, "", "  ")
+	fullContent.WriteString(string(jsonBytes))
+	fullContent.WriteString("\n```\n")
+
+	os.WriteFile(fullPath, []byte(fullContent.String()), 0644)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// ActivateAIPresetRequest represents the request body for activating an AI preset
+type ActivateAIPresetRequest struct {
+	WorkspacePath string `json:"workspacePath"`
+	PresetNumber  int    `json:"presetNumber"`
+}
+
+// SaveSpecificationsRequest represents the request body for saving specification files
+type SaveSpecificationsRequest struct {
+	WorkspacePath string                    `json:"workspacePath"`
+	Files         []SpecificationFileData   `json:"files"`
+	Subfolder     string                    `json:"subfolder"` // Optional: defaults to "specifications"
+}
+
+// SpecificationFileData represents a single file to save
+type SpecificationFileData struct {
+	FileName string `json:"fileName"`
+	Content  string `json:"content"`
+}
+
+// SaveImageRequest represents the request body for saving an image file
+type SaveImageRequest struct {
+	WorkspacePath string `json:"workspacePath"`
+	FileName      string `json:"fileName"`
+	ImageData     string `json:"imageData"` // Base64 encoded
+	MimeType      string `json:"mimeType"`
+}
+
+// HandleSaveImage handles POST /save-image
+func (h *Handler) HandleSaveImage(w http.ResponseWriter, r *http.Request) {
+	var req SaveImageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		http.Error(w, "workspacePath is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.FileName == "" || req.ImageData == "" {
+		http.Error(w, "fileName and imageData are required", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure specifications folder exists
+	specificationsPath := filepath.Join(req.WorkspacePath, "specifications")
+	if err := os.MkdirAll(specificationsPath, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("failed to create specifications folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Decode base64 image data
+	imageBytes, err := base64.StdEncoding.DecodeString(req.ImageData)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to decode image data: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Save the image file
+	filePath := filepath.Join(specificationsPath, req.FileName)
+	if err := os.WriteFile(filePath, imageBytes, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("failed to write image file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Printf("[SaveImage] Saved image to %s (%d bytes)\n", filePath, len(imageBytes))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Image saved to specifications/%s", req.FileName),
+		"path":    filePath,
+	})
+}
+
+// HandleActivateAIPreset handles POST /activate-ai-preset
+func (h *Handler) HandleActivateAIPreset(w http.ResponseWriter, r *http.Request) {
+	var req ActivateAIPresetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		http.Error(w, "workspacePath is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.PresetNumber < 1 || req.PresetNumber > 5 {
+		http.Error(w, "presetNumber must be between 1 and 5", http.StatusBadRequest)
+		return
+	}
+
+	// Copy the AI policy preset file to the workspace specifications folder
+	if err := CopyAIPolicyPresetPublic(req.PresetNumber, req.WorkspacePath); err != nil {
+		http.Error(w, fmt.Sprintf("failed to copy AI preset: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("AI Preset %d activated and copied to implementation folder", req.PresetNumber),
+	})
+}
+
+// AnalyzeCapabilitiesRequest represents the request for analyzing capabilities
+type AnalyzeCapabilitiesRequest struct {
+	Files                []SpecificationFile `json:"files"`
+	AnthropicKey         string              `json:"anthropic_key"`
+	ExistingCapabilities []string            `json:"existingCapabilities"`
+}
+
+// CapabilitySuggestion represents a suggested capability
+type CapabilitySuggestion struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Type        string `json:"type"` // capability, feature, or enabler
+	Rationale   string `json:"rationale"`
+}
+
+// HandleAnalyzeCapabilities handles POST /analyze-capabilities
+func (h *Handler) HandleAnalyzeCapabilities(w http.ResponseWriter, r *http.Request) {
+	var req AnalyzeCapabilitiesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Files) == 0 {
+		http.Error(w, "files are required", http.StatusBadRequest)
+		return
+	}
+
+	if req.AnthropicKey == "" {
+		http.Error(w, "anthropic_key is required", http.StatusBadRequest)
+		return
+	}
+
+	// Combine all file contents
+	var allContent strings.Builder
+	allContent.WriteString("# Existing Specification Files\n\n")
+	for _, file := range req.Files {
+		allContent.WriteString(fmt.Sprintf("## File: %s\n\n%s\n\n---\n\n", file.Filename, file.Content))
+	}
+
+	// Add existing capabilities
+	if len(req.ExistingCapabilities) > 0 {
+		allContent.WriteString("# Existing Capabilities\n\n")
+		for _, cap := range req.ExistingCapabilities {
+			allContent.WriteString(fmt.Sprintf("- %s\n", cap))
+		}
+		allContent.WriteString("\n")
+	}
+
+	// Create prompt for Claude
+	prompt := fmt.Sprintf(`Analyze the following specification files and suggest new capabilities, features, or enablers that should be added based on the content.
+
+%s
+
+Based on your analysis, suggest 3-5 new items that are NOT already in the existing capabilities list. For each suggestion, provide:
+1. A clear name
+2. A description of what it does
+3. The type (capability, feature, or enabler)
+4. A rationale for why it should be added
+
+Return your response as a JSON array with this exact format:
+{
+  "suggestions": [
+    {
+      "name": "Example Name",
+      "description": "What this capability/feature/enabler does",
+      "type": "capability",
+      "rationale": "Why this should be added based on the specifications"
+    }
+  ]
+}
+
+Only return the JSON, no other text.`, allContent.String())
+
+	// Call Claude API
+	requestBody := map[string]interface{}{
+		"model":      "claude-sonnet-4-20250514",
+		"max_tokens": 4096,
+		"messages": []map[string]string{
+			{
+				"role":    "user",
+				"content": prompt,
+			},
+		},
+	}
+
+	jsonBody, err := json.Marshal(requestBody)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to marshal request: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	httpReq, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", strings.NewReader(string(jsonBody)))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to create request: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-api-key", req.AnthropicKey)
+	httpReq.Header.Set("anthropic-version", "2023-06-01")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to call Claude API: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		http.Error(w, fmt.Sprintf("Claude API error: %s", string(body)), resp.StatusCode)
+		return
+	}
+
+	var claudeResp struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&claudeResp); err != nil {
+		http.Error(w, fmt.Sprintf("failed to decode Claude response: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if len(claudeResp.Content) == 0 {
+		http.Error(w, "empty response from Claude", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the JSON response from Claude
+	responseText := claudeResp.Content[0].Text
+
+	// Extract JSON from response (in case there's extra text)
+	jsonStart := strings.Index(responseText, "{")
+	jsonEnd := strings.LastIndex(responseText, "}")
+	if jsonStart == -1 || jsonEnd == -1 {
+		http.Error(w, "invalid JSON in Claude response", http.StatusInternalServerError)
+		return
+	}
+
+	jsonStr := responseText[jsonStart : jsonEnd+1]
+
+	var result struct {
+		Suggestions []CapabilitySuggestion `json:"suggestions"`
+	}
+
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		http.Error(w, fmt.Sprintf("failed to parse suggestions: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// HandleSaveSpecifications handles POST /save-specifications
+func (h *Handler) HandleSaveSpecifications(w http.ResponseWriter, r *http.Request) {
+	var req SaveSpecificationsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		http.Error(w, "workspacePath is required", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Files) == 0 {
+		http.Error(w, "files array is required", http.StatusBadRequest)
+		return
+	}
+
+	// Determine target subfolder - default to "specifications" if not provided
+	targetSubfolder := req.Subfolder
+	if targetSubfolder == "" {
+		targetSubfolder = "specifications"
+	}
+
+	// Construct path to workspace target folder
+	// Handle both relative and absolute paths, and Docker volume mounts
+	workspacePath := req.WorkspacePath
+
+	// If path contains "workspaces/", extract the relative part
+	// This handles absolute host paths when running inside Docker containers
+	if idx := strings.Index(workspacePath, "workspaces/"); idx != -1 {
+		workspacePath = workspacePath[idx:]
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to get working directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+	targetPath := filepath.Join(cwd, workspacePath, targetSubfolder)
+
+	// Ensure target folder exists
+	if err := os.MkdirAll(targetPath, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("failed to create %s folder: %v", targetSubfolder, err), http.StatusInternalServerError)
+		return
+	}
+
+	// Save all files
+	savedFiles := []string{}
+	for _, file := range req.Files {
+		if file.FileName == "" || file.Content == "" {
+			continue
+		}
+		filePath := filepath.Join(targetPath, file.FileName)
+		if err := os.WriteFile(filePath, []byte(file.Content), 0644); err != nil {
+			http.Error(w, fmt.Sprintf("failed to write file %s: %v", file.FileName, err), http.StatusInternalServerError)
+			return
+		}
+		savedFiles = append(savedFiles, fmt.Sprintf("%s/%s", targetSubfolder, file.FileName))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("%d files saved successfully", len(savedFiles)),
+		"files":   savedFiles,
+	})
+}
+
+// DeleteSpecificationRequest represents a request to delete a specification file
+type DeleteSpecificationRequest struct {
+	Path string `json:"path"`
+}
+
+// HandleDeleteSpecification handles POST /delete-specification
+func (h *Handler) HandleDeleteSpecification(w http.ResponseWriter, r *http.Request) {
+	var req DeleteSpecificationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	// Handle path translation for Docker environments
+	filePath := req.Path
+
+	// If path contains "workspaces/", extract the relative part
+	if idx := strings.Index(filePath, "workspaces/"); idx != -1 {
+		filePath = filePath[idx:]
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to get working directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Construct absolute path
+	absolutePath := filepath.Join(cwd, filePath)
+
+	// Verify the file exists
+	if _, err := os.Stat(absolutePath); os.IsNotExist(err) {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+
+	// Delete the file
+	if err := os.Remove(absolutePath); err != nil {
+		http.Error(w, fmt.Sprintf("failed to delete file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "File deleted successfully",
+	})
+}
+
+// ReadSpecificationRequest represents a request to read a specification file
+type ReadSpecificationRequest struct {
+	WorkspacePath string `json:"workspacePath"`
+	Subfolder     string `json:"subfolder"`
+	FileName      string `json:"fileName"`
+}
+
+// HandleReadSpecification handles POST /read-specification
+func (h *Handler) HandleReadSpecification(w http.ResponseWriter, r *http.Request) {
+	var req ReadSpecificationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		http.Error(w, "workspacePath is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.FileName == "" {
+		http.Error(w, "fileName is required", http.StatusBadRequest)
+		return
+	}
+
+	// Determine target subfolder - default to "specifications" if not provided
+	targetSubfolder := req.Subfolder
+	if targetSubfolder == "" {
+		targetSubfolder = "specifications"
+	}
+
+	// Handle path translation for Docker environments
+	workspacePath := req.WorkspacePath
+
+	// If path contains "workspaces/", extract the relative part
+	if idx := strings.Index(workspacePath, "workspaces/"); idx != -1 {
+		workspacePath = workspacePath[idx:]
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to get working directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Construct absolute path to the file
+	filePath := filepath.Join(cwd, workspacePath, targetSubfolder, req.FileName)
+
+	// Verify the file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+
+	// Read the file
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to read file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"content":  string(content),
+		"fileName": req.FileName,
+	})
+}
+
+// ReadStoryboardFilesRequest represents a request to read storyboard files
+type ReadStoryboardFilesRequest struct {
+	WorkspacePath string `json:"workspacePath"`
+}
+
+// StoryboardFile represents a storyboard file with its content
+type StoryboardFile struct {
+	FileName string `json:"fileName"`
+	Content  string `json:"content"`
+}
+
+// HandleReadStoryboardFiles handles POST /read-storyboard-files
+// Reads all STORY-*.md files from the conception folder
+func (h *Handler) HandleReadStoryboardFiles(w http.ResponseWriter, r *http.Request) {
+	var req ReadStoryboardFilesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		http.Error(w, "workspacePath is required", http.StatusBadRequest)
+		return
+	}
+
+	// Handle path translation for Docker environments
+	workspacePath := req.WorkspacePath
+
+	// If path contains "workspaces/", extract the relative part
+	if idx := strings.Index(workspacePath, "workspaces/"); idx != -1 {
+		workspacePath = workspacePath[idx:]
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to get working directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Look in conception folder for STORY-*.md files
+	conceptionPath := filepath.Join(cwd, workspacePath, "conception")
+
+	// Check if conception folder exists
+	if _, err := os.Stat(conceptionPath); os.IsNotExist(err) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"files":   []StoryboardFile{},
+			"message": "No conception folder found",
+		})
+		return
+	}
+
+	// Read all files in the conception folder
+	entries, err := os.ReadDir(conceptionPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to read conception folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var files []StoryboardFile
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		fileName := entry.Name()
+
+		// Process STORY-*.md files and SBSUP-INDEX-1.md (for connections data)
+		isStoryFile := strings.HasPrefix(fileName, "STORY-") && strings.HasSuffix(fileName, ".md")
+		isIndexFile := fileName == "SBSUP-INDEX-1.md"
+
+		if !isStoryFile && !isIndexFile {
+			continue
+		}
+
+		// Read file content
+		filePath := filepath.Join(conceptionPath, fileName)
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			continue // Skip files that can't be read
+		}
+
+		files = append(files, StoryboardFile{
+			FileName: fileName,
+			Content:  string(content),
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"files":   files,
+		"count":   len(files),
+	})
+}
+
+// ==================== EPIC FILES (SAWai Epics - Scaled Agile With AI) ====================
+
+// FileEpic represents an epic parsed from a markdown file
+type FileEpic struct {
+	Filename        string            `json:"filename"`
+	Path            string            `json:"path"`
+	Name            string            `json:"name"`
+	Description     string            `json:"description"`
+	Status          string            `json:"status"`
+	Content         string            `json:"content"`
+	Fields          map[string]string `json:"fields"`
+	UserValue       int               `json:"userValue"`
+	TimeCriticality int               `json:"timeCriticality"`
+	RiskReduction   int               `json:"riskReduction"`
+	JobSize         int               `json:"jobSize"`
+	WsjfScore       float64           `json:"wsjfScore"`
+}
+
+// EpicFilesRequest represents the request to list epic files
+type EpicFilesRequest struct {
+	WorkspacePath string `json:"workspacePath"`
+}
+
+// HandleEpicFiles handles POST /epic-files
+func (h *Handler) HandleEpicFiles(w http.ResponseWriter, r *http.Request) {
+	var req EpicFilesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		http.Error(w, "workspacePath is required", http.StatusBadRequest)
+		return
+	}
+
+	// Epic files are stored in the definition folder
+	specsPath := filepath.Join(req.WorkspacePath, "definition")
+
+	if _, err := os.Stat(specsPath); os.IsNotExist(err) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"epics": []FileEpic{},
+		})
+		return
+	}
+
+	var epics []FileEpic
+
+	err := filepath.Walk(specsPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		filename := info.Name()
+		filenameUpper := strings.ToUpper(filename)
+
+		// Match EPIC-*.md files
+		if !strings.HasPrefix(filenameUpper, "EPIC") {
+			return nil
+		}
+
+		if !strings.HasSuffix(strings.ToLower(filename), ".md") {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		epic := parseEpicMarkdown(filename, path, string(content))
+		epics = append(epics, epic)
+
+		return nil
+	})
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to scan specifications folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"epics": epics,
+	})
+}
+
+// parseEpicMarkdown parses a markdown file to extract epic information
+func parseEpicMarkdown(filename, path, content string) FileEpic {
+	epic := FileEpic{
+		Filename: filename,
+		Path:     path,
+		Content:  content,
+		Fields:   make(map[string]string),
+		Status:   "Funnel",
+	}
+
+	lines := strings.Split(content, "\n")
+	var currentSection string
+	var sectionContent []string
+
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		// Extract title from # heading
+		if strings.HasPrefix(trimmedLine, "# ") {
+			epic.Name = strings.TrimPrefix(trimmedLine, "# ")
+			continue
+		}
+
+		// Extract section headers
+		if strings.HasPrefix(trimmedLine, "## ") {
+			// Save previous section
+			if currentSection != "" {
+				epic.Fields[currentSection] = strings.TrimSpace(strings.Join(sectionContent, "\n"))
+			}
+			currentSection = strings.TrimPrefix(trimmedLine, "## ")
+			sectionContent = []string{}
+			continue
+		}
+
+		// Extract metadata fields
+		if strings.HasPrefix(trimmedLine, "**Status:**") {
+			epic.Status = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "**Status:**"))
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "**User Value:**") {
+			val := strings.TrimSpace(strings.TrimPrefix(trimmedLine, "**User Value:**"))
+			if v, err := strconv.Atoi(val); err == nil {
+				epic.UserValue = v
+			}
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "**Time Criticality:**") {
+			val := strings.TrimSpace(strings.TrimPrefix(trimmedLine, "**Time Criticality:**"))
+			if v, err := strconv.Atoi(val); err == nil {
+				epic.TimeCriticality = v
+			}
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "**Risk Reduction:**") {
+			val := strings.TrimSpace(strings.TrimPrefix(trimmedLine, "**Risk Reduction:**"))
+			if v, err := strconv.Atoi(val); err == nil {
+				epic.RiskReduction = v
+			}
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "**Job Size:**") {
+			val := strings.TrimSpace(strings.TrimPrefix(trimmedLine, "**Job Size:**"))
+			if v, err := strconv.Atoi(val); err == nil {
+				epic.JobSize = v
+			}
+			continue
+		}
+
+		// Collect section content
+		if currentSection != "" {
+			sectionContent = append(sectionContent, line)
+		} else if epic.Description == "" && trimmedLine != "" && !strings.HasPrefix(trimmedLine, "**") {
+			// First non-metadata paragraph is the description
+			epic.Description = trimmedLine
+		}
+	}
+
+	// Save last section
+	if currentSection != "" {
+		epic.Fields[currentSection] = strings.TrimSpace(strings.Join(sectionContent, "\n"))
+	}
+
+	// Calculate WSJF score
+	if epic.JobSize > 0 {
+		costOfDelay := float64(epic.UserValue + epic.TimeCriticality + epic.RiskReduction)
+		epic.WsjfScore = costOfDelay / float64(epic.JobSize)
+	}
+
+	return epic
+}
+
+// SaveEpicRequest represents the request to save an epic file
+type SaveEpicRequest struct {
+	Path              string `json:"path"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	Status            string `json:"status"`
+	BusinessOutcome   string `json:"businessOutcome"`
+	MvpDefinition     string `json:"mvpDefinition"`
+	AcceptanceCriteria string `json:"acceptanceCriteria"`
+	UserValue         int    `json:"userValue"`
+	TimeCriticality   int    `json:"timeCriticality"`
+	RiskReduction     int    `json:"riskReduction"`
+	JobSize           int    `json:"jobSize"`
+	Content           string `json:"content"`
+}
+
+// HandleSaveEpic handles POST /save-epic
+func (h *Handler) HandleSaveEpic(w http.ResponseWriter, r *http.Request) {
+	var req SaveEpicRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure parent directory exists
+	dir := filepath.Dir(req.Path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("failed to create directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Build markdown content
+	var content strings.Builder
+	content.WriteString(fmt.Sprintf("# %s\n\n", req.Name))
+
+	// Metadata section
+	content.WriteString("## Metadata\n")
+	content.WriteString(fmt.Sprintf("**Status:** %s\n", req.Status))
+	content.WriteString(fmt.Sprintf("**Generated:** %s\n\n", time.Now().Format("01/02/2006")))
+
+	// WSJF section
+	content.WriteString("## WSJF Scoring\n")
+	content.WriteString(fmt.Sprintf("**User Value:** %d\n", req.UserValue))
+	content.WriteString(fmt.Sprintf("**Time Criticality:** %d\n", req.TimeCriticality))
+	content.WriteString(fmt.Sprintf("**Risk Reduction:** %d\n", req.RiskReduction))
+	content.WriteString(fmt.Sprintf("**Job Size:** %d\n", req.JobSize))
+	if req.JobSize > 0 {
+		wsjf := float64(req.UserValue+req.TimeCriticality+req.RiskReduction) / float64(req.JobSize)
+		content.WriteString(fmt.Sprintf("**WSJF Score:** %.1f\n\n", wsjf))
+	} else {
+		content.WriteString("**WSJF Score:** N/A\n\n")
+	}
+
+	// Description
+	if req.Description != "" {
+		content.WriteString("## Description\n")
+		content.WriteString(req.Description + "\n\n")
+	}
+
+	// Business Outcome
+	if req.BusinessOutcome != "" {
+		content.WriteString("## Business Outcome\n")
+		content.WriteString(req.BusinessOutcome + "\n\n")
+	}
+
+	// MVP Definition
+	if req.MvpDefinition != "" {
+		content.WriteString("## MVP Definition\n")
+		content.WriteString(req.MvpDefinition + "\n\n")
+	}
+
+	// Acceptance Criteria
+	if req.AcceptanceCriteria != "" {
+		content.WriteString("## Acceptance Criteria\n")
+		content.WriteString(req.AcceptanceCriteria + "\n\n")
+	}
+
+	// Additional content
+	if req.Content != "" {
+		content.WriteString("## Additional Notes\n")
+		content.WriteString(req.Content + "\n")
+	}
+
+	if err := os.WriteFile(req.Path, []byte(content.String()), 0644); err != nil {
+		http.Error(w, fmt.Sprintf("failed to save file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Epic saved successfully",
+	})
+}
+
+// DeleteEpicRequest represents the request to delete an epic file
+type DeleteEpicRequest struct {
+	Path string `json:"path"`
+}
+
+// HandleDeleteEpic handles POST /delete-epic
+func (h *Handler) HandleDeleteEpic(w http.ResponseWriter, r *http.Request) {
+	var req DeleteEpicRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := os.Stat(req.Path); os.IsNotExist(err) {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+
+	if err := os.Remove(req.Path); err != nil {
+		http.Error(w, fmt.Sprintf("failed to delete file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Epic deleted successfully",
+	})
+}
+
+// ==================== THEME FILES (SAWai Strategic Themes) ====================
+
+// FileTheme represents a theme parsed from a markdown file
+type FileTheme struct {
+	Filename    string            `json:"filename"`
+	Path        string            `json:"path"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Status      string            `json:"status"`
+	Content     string            `json:"content"`
+	Fields      map[string]string `json:"fields"`
+	ThemeType   string            `json:"themeType"` // vision, strategic-theme, market-context
+}
+
+// ThemeFilesRequest represents the request to list theme files
+type ThemeFilesRequest struct {
+	WorkspacePath string `json:"workspacePath"`
+}
+
+// HandleThemeFiles handles POST /theme-files
+func (h *Handler) HandleThemeFiles(w http.ResponseWriter, r *http.Request) {
+	var req ThemeFilesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		http.Error(w, "workspacePath is required", http.StatusBadRequest)
+		return
+	}
+
+	// Theme files are stored in the conception folder
+	specsPath := filepath.Join(req.WorkspacePath, "conception")
+
+	if _, err := os.Stat(specsPath); os.IsNotExist(err) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"themes": []FileTheme{},
+		})
+		return
+	}
+
+	var themes []FileTheme
+
+	err := filepath.Walk(specsPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		filename := info.Name()
+		filenameUpper := strings.ToUpper(filename)
+
+		// Match vision/theme files: VIS-*.md, STRAT-*.md, MKT-*.md (new format)
+		// Also support legacy: THEME-*.md, VISION-*.md
+		isThemeFile := strings.HasPrefix(filenameUpper, "VIS-") ||
+			strings.HasPrefix(filenameUpper, "STRAT-") ||
+			strings.HasPrefix(filenameUpper, "MKT-") ||
+			strings.HasPrefix(filenameUpper, "THEME") ||
+			strings.HasPrefix(filenameUpper, "VISION")
+		if !isThemeFile {
+			return nil
+		}
+
+		if !strings.HasSuffix(strings.ToLower(filename), ".md") {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		theme := parseThemeMarkdown(filename, path, string(content))
+		themes = append(themes, theme)
+
+		return nil
+	})
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to scan specifications folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"themes": themes,
+	})
+}
+
+// parseThemeMarkdown parses a markdown file to extract theme information
+func parseThemeMarkdown(filename, path, content string) FileTheme {
+	theme := FileTheme{
+		Filename:  filename,
+		Path:      path,
+		Content:   content,
+		Fields:    make(map[string]string),
+		ThemeType: "strategic-theme",
+	}
+
+	// Infer type from filename prefix
+	filenameUpper := strings.ToUpper(filename)
+	if strings.HasPrefix(filenameUpper, "VIS-") || strings.HasPrefix(filenameUpper, "VISION") {
+		theme.ThemeType = "vision"
+	} else if strings.HasPrefix(filenameUpper, "MKT-") {
+		theme.ThemeType = "market-context"
+	} else if strings.HasPrefix(filenameUpper, "STRAT-") || strings.HasPrefix(filenameUpper, "THEME") {
+		theme.ThemeType = "strategic-theme"
+	}
+
+	lines := strings.Split(content, "\n")
+	var currentSection string
+	var sectionContent []string
+
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		// Extract title from # heading
+		if strings.HasPrefix(trimmedLine, "# ") {
+			theme.Name = strings.TrimPrefix(trimmedLine, "# ")
+			continue
+		}
+
+		// Extract section headers
+		if strings.HasPrefix(trimmedLine, "## ") {
+			// Save previous section
+			if currentSection != "" {
+				theme.Fields[currentSection] = strings.TrimSpace(strings.Join(sectionContent, "\n"))
+			}
+			currentSection = strings.TrimPrefix(trimmedLine, "## ")
+			sectionContent = []string{}
+			continue
+		}
+
+		// Extract metadata fields
+		if strings.HasPrefix(trimmedLine, "**Type:**") {
+			typeVal := strings.TrimSpace(strings.TrimPrefix(trimmedLine, "**Type:**"))
+			// Map display names back to internal type names
+			switch typeVal {
+			case "Vision Statement":
+				theme.ThemeType = "vision"
+			case "Market Context":
+				theme.ThemeType = "market-context"
+			case "Strategic Theme":
+				theme.ThemeType = "strategic-theme"
+			default:
+				theme.ThemeType = strings.ToLower(strings.ReplaceAll(typeVal, " ", "-"))
+			}
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "**Status:**") {
+			theme.Status = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "**Status:**"))
+			continue
+		}
+
+		// Collect section content
+		if currentSection != "" {
+			sectionContent = append(sectionContent, line)
+		} else if theme.Description == "" && trimmedLine != "" && !strings.HasPrefix(trimmedLine, "**") {
+			theme.Description = trimmedLine
+		}
+	}
+
+	// Save last section
+	if currentSection != "" {
+		theme.Fields[currentSection] = strings.TrimSpace(strings.Join(sectionContent, "\n"))
+	}
+
+	return theme
+}
+
+// SaveThemeRequest represents the request to save a theme file
+type SaveThemeRequest struct {
+	Path           string `json:"path"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	ThemeType      string `json:"themeType"`
+	TargetOutcomes string `json:"targetOutcomes"`
+	KeyMetrics     string `json:"keyMetrics"`
+	TimeHorizon    string `json:"timeHorizon"`
+	Stakeholders   string `json:"stakeholders"`
+	Content        string `json:"content"`
+}
+
+// HandleSaveTheme handles POST /save-theme
+func (h *Handler) HandleSaveTheme(w http.ResponseWriter, r *http.Request) {
+	var req SaveThemeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure parent directory exists
+	dir := filepath.Dir(req.Path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("failed to create directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Format theme type for display
+	themeTypeDisplay := "Strategic Theme"
+	switch req.ThemeType {
+	case "vision":
+		themeTypeDisplay = "Vision Statement"
+	case "market-context":
+		themeTypeDisplay = "Market Context"
+	}
+
+	// Build markdown content
+	var content strings.Builder
+	content.WriteString(fmt.Sprintf("# %s\n\n", req.Name))
+
+	// Metadata section
+	content.WriteString("## Metadata\n")
+	content.WriteString(fmt.Sprintf("**Type:** %s\n", themeTypeDisplay))
+	content.WriteString(fmt.Sprintf("**Generated:** %s\n\n", time.Now().Format("01/02/2006")))
+
+	// Description
+	if req.Description != "" {
+		content.WriteString("## Description\n")
+		content.WriteString(req.Description + "\n\n")
+	}
+
+	// Target Outcomes
+	if req.TargetOutcomes != "" {
+		content.WriteString("## Target Outcomes\n")
+		content.WriteString(req.TargetOutcomes + "\n\n")
+	}
+
+	// Key Metrics
+	if req.KeyMetrics != "" {
+		content.WriteString("## Key Metrics\n")
+		content.WriteString(req.KeyMetrics + "\n\n")
+	}
+
+	// Time Horizon
+	if req.TimeHorizon != "" {
+		content.WriteString("## Time Horizon\n")
+		content.WriteString(req.TimeHorizon + "\n\n")
+	}
+
+	// Stakeholders
+	if req.Stakeholders != "" {
+		content.WriteString("## Stakeholders\n")
+		content.WriteString(req.Stakeholders + "\n\n")
+	}
+
+	// Additional content
+	if req.Content != "" {
+		content.WriteString("## Additional Notes\n")
+		content.WriteString(req.Content + "\n")
+	}
+
+	if err := os.WriteFile(req.Path, []byte(content.String()), 0644); err != nil {
+		http.Error(w, fmt.Sprintf("failed to save file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Theme saved successfully",
+	})
+}
+
+// DeleteThemeRequest represents the request to delete a theme file
+type DeleteThemeRequest struct {
+	Path string `json:"path"`
+}
+
+// HandleDeleteTheme handles POST /delete-theme
+func (h *Handler) HandleDeleteTheme(w http.ResponseWriter, r *http.Request) {
+	var req DeleteThemeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := os.Stat(req.Path); os.IsNotExist(err) {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+
+	if err := os.Remove(req.Path); err != nil {
+		http.Error(w, fmt.Sprintf("failed to delete file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Theme deleted successfully",
+	})
+}
+
+// ==================== FEATURE FILES (SAWai Features - FEAT-*.md) ====================
+
+// FileFeature represents a feature parsed from a markdown file
+type FileFeature struct {
+	Filename        string            `json:"filename"`
+	Path            string            `json:"path"`
+	Name            string            `json:"name"`
+	Description     string            `json:"description"`
+	Status          string            `json:"status"`
+	Content         string            `json:"content"`
+	Fields          map[string]string `json:"fields"`
+	ParentEpic      string            `json:"parentEpic"`
+	BenefitHypothesis string          `json:"benefitHypothesis"`
+}
+
+// FeatureFilesRequest represents the request to list feature files
+type FeatureFilesRequest struct {
+	WorkspacePath string `json:"workspacePath"`
+}
+
+// HandleFeatureFiles handles POST /feature-files
+func (h *Handler) HandleFeatureFiles(w http.ResponseWriter, r *http.Request) {
+	var req FeatureFilesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspacePath == "" {
+		http.Error(w, "workspacePath is required", http.StatusBadRequest)
+		return
+	}
+
+	specsPath := filepath.Join(req.WorkspacePath, "specifications")
+
+	if _, err := os.Stat(specsPath); os.IsNotExist(err) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"features": []FileFeature{},
+		})
+		return
+	}
+
+	var features []FileFeature
+
+	err := filepath.Walk(specsPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		filename := info.Name()
+		filenameUpper := strings.ToUpper(filename)
+
+		// Match FEAT-*.md files
+		if !strings.HasPrefix(filenameUpper, "FEAT") {
+			return nil
+		}
+
+		if !strings.HasSuffix(strings.ToLower(filename), ".md") {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		feature := parseFeatureMarkdown(filename, path, string(content))
+		features = append(features, feature)
+
+		return nil
+	})
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to scan specifications folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"features": features,
+	})
+}
+
+// parseFeatureMarkdown parses a markdown file to extract feature information
+func parseFeatureMarkdown(filename, path, content string) FileFeature {
+	feature := FileFeature{
+		Filename: filename,
+		Path:     path,
+		Content:  content,
+		Fields:   make(map[string]string),
+		Status:   "Planned",
+	}
+
+	lines := strings.Split(content, "\n")
+	var currentSection string
+	var sectionContent []string
+
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		// Extract title from # heading
+		if strings.HasPrefix(trimmedLine, "# ") {
+			feature.Name = strings.TrimPrefix(trimmedLine, "# ")
+			continue
+		}
+
+		// Extract section headers
+		if strings.HasPrefix(trimmedLine, "## ") {
+			// Save previous section
+			if currentSection != "" {
+				feature.Fields[currentSection] = strings.TrimSpace(strings.Join(sectionContent, "\n"))
+			}
+			currentSection = strings.TrimPrefix(trimmedLine, "## ")
+			sectionContent = []string{}
+			continue
+		}
+
+		// Extract metadata fields
+		if strings.HasPrefix(trimmedLine, "**Status:**") {
+			feature.Status = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "**Status:**"))
+			continue
+		}
+
+		if strings.HasPrefix(trimmedLine, "**Parent Epic:**") {
+			feature.ParentEpic = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "**Parent Epic:**"))
+			continue
+		}
+
+		// Collect section content
+		if currentSection != "" {
+			sectionContent = append(sectionContent, line)
+		} else if feature.Description == "" && trimmedLine != "" && !strings.HasPrefix(trimmedLine, "**") {
+			feature.Description = trimmedLine
+		}
+	}
+
+	// Save last section
+	if currentSection != "" {
+		feature.Fields[currentSection] = strings.TrimSpace(strings.Join(sectionContent, "\n"))
+	}
+
+	// Extract benefit hypothesis from fields if present
+	if bh, ok := feature.Fields["Benefit Hypothesis"]; ok {
+		feature.BenefitHypothesis = bh
+	}
+
+	return feature
+}
+
+// SaveFeatureRequest represents the request to save a feature file
+type SaveFeatureRequest struct {
+	Path              string `json:"path"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	Status            string `json:"status"`
+	ParentEpic        string `json:"parentEpic"`
+	BenefitHypothesis string `json:"benefitHypothesis"`
+	AcceptanceCriteria string `json:"acceptanceCriteria"`
+	Content           string `json:"content"`
+}
+
+// HandleSaveFeature handles POST /save-feature
+func (h *Handler) HandleSaveFeature(w http.ResponseWriter, r *http.Request) {
+	var req SaveFeatureRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure parent directory exists
+	dir := filepath.Dir(req.Path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("failed to create directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Build markdown content
+	var content strings.Builder
+	content.WriteString(fmt.Sprintf("# %s\n\n", req.Name))
+
+	// Metadata section
+	content.WriteString("## Metadata\n")
+	content.WriteString(fmt.Sprintf("**Status:** %s\n", req.Status))
+	if req.ParentEpic != "" {
+		content.WriteString(fmt.Sprintf("**Parent Epic:** %s\n", req.ParentEpic))
+	}
+	content.WriteString(fmt.Sprintf("**Generated:** %s\n\n", time.Now().Format("01/02/2006")))
+
+	// Description
+	if req.Description != "" {
+		content.WriteString("## Description\n")
+		content.WriteString(req.Description + "\n\n")
+	}
+
+	// Benefit Hypothesis
+	if req.BenefitHypothesis != "" {
+		content.WriteString("## Benefit Hypothesis\n")
+		content.WriteString(req.BenefitHypothesis + "\n\n")
+	}
+
+	// Acceptance Criteria
+	if req.AcceptanceCriteria != "" {
+		content.WriteString("## Acceptance Criteria\n")
+		content.WriteString(req.AcceptanceCriteria + "\n\n")
+	}
+
+	// Additional content
+	if req.Content != "" {
+		content.WriteString("## Additional Notes\n")
+		content.WriteString(req.Content + "\n")
+	}
+
+	if err := os.WriteFile(req.Path, []byte(content.String()), 0644); err != nil {
+		http.Error(w, fmt.Sprintf("failed to save file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Feature saved successfully",
+	})
+}
+
+// DeleteFeatureRequest represents the request to delete a feature file
+type DeleteFeatureRequest struct {
+	Path string `json:"path"`
+}
+
+// HandleDeleteFeature handles POST /delete-feature
+func (h *Handler) HandleDeleteFeature(w http.ResponseWriter, r *http.Request) {
+	var req DeleteFeatureRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := os.Stat(req.Path); os.IsNotExist(err) {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+
+	if err := os.Remove(req.Path); err != nil {
+		http.Error(w, fmt.Sprintf("failed to delete file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Feature deleted successfully",
+	})
+}
+
+// WorkspaceConfig represents the configuration stored in .ubeworkspace file
+type WorkspaceConfig struct {
+	ID               string                 `json:"id"`
+	Name             string                 `json:"name"`
+	Description      string                 `json:"description,omitempty"`
+	WorkspaceType    string                 `json:"workspaceType,omitempty"`
+	FigmaTeamURL     string                 `json:"figmaTeamUrl,omitempty"`
+	ProjectFolder    string                 `json:"projectFolder,omitempty"`
+	ActiveAIPreset   int                    `json:"activeAIPreset,omitempty"`
+	SelectedUIFramework string             `json:"selectedUIFramework,omitempty"`
+	SelectedUILayout string                 `json:"selectedUILayout,omitempty"`
+	OwnerID          string                 `json:"ownerId,omitempty"`
+	OwnerName        string                 `json:"ownerName,omitempty"`
+	IsShared         bool                   `json:"isShared"`
+	CreatedAt        string                 `json:"createdAt"`
+	UpdatedAt        string                 `json:"updatedAt"`
+	Version          string                 `json:"version"`
+	CustomSettings   map[string]interface{} `json:"customSettings,omitempty"`
+}
+
+// SaveWorkspaceConfigRequest represents the request to save workspace config
+type SaveWorkspaceConfigRequest struct {
+	Config WorkspaceConfig `json:"config"`
+}
+
+// HandleSaveWorkspaceConfig handles POST /workspace-config/save
+// Creates or updates the .ubeworkspace file in the workspace folder
+func (h *Handler) HandleSaveWorkspaceConfig(w http.ResponseWriter, r *http.Request) {
+	var req SaveWorkspaceConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Config.ProjectFolder == "" {
+		http.Error(w, "projectFolder is required", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure path is within workspaces directory for security
+	if !strings.HasPrefix(req.Config.ProjectFolder, "workspaces") {
+		http.Error(w, "projectFolder must be within workspaces directory", http.StatusBadRequest)
+		return
+	}
+
+	// Set version if not provided
+	if req.Config.Version == "" {
+		req.Config.Version = "1.0"
+	}
+
+	// Ensure the workspace folder exists
+	if err := os.MkdirAll(req.Config.ProjectFolder, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("failed to create workspace folder: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Create the .ubeworkspace file path
+	configPath := filepath.Join(req.Config.ProjectFolder, ".ubeworkspace")
+
+	// Marshal config to JSON with pretty formatting
+	configJSON, err := json.MarshalIndent(req.Config, "", "  ")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to marshal config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Write the config file
+	if err := os.WriteFile(configPath, configJSON, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("failed to write config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"path":    configPath,
+		"message": "Workspace configuration saved successfully",
+	})
+}
+
+// ScannedWorkspace represents a workspace found by scanning folders
+type ScannedWorkspace struct {
+	FolderName string          `json:"folderName"`
+	FolderPath string          `json:"folderPath"`
+	Config     *WorkspaceConfig `json:"config,omitempty"`
+	HasConfig  bool            `json:"hasConfig"`
+}
+
+// ScanWorkspacesResponse represents the response from scanning workspaces
+type ScanWorkspacesResponse struct {
+	Workspaces []ScannedWorkspace `json:"workspaces"`
+	BasePath   string             `json:"basePath"`
+}
+
+// HandleScanWorkspaces handles GET /workspace-config/scan
+// Scans the ./workspaces folder for subfolders with .ubeworkspace files
+func (h *Handler) HandleScanWorkspaces(w http.ResponseWriter, r *http.Request) {
+	basePath := "workspaces"
+
+	// Check if workspaces folder exists
+	if _, err := os.Stat(basePath); os.IsNotExist(err) {
+		// Return empty list if folder doesn't exist
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ScanWorkspacesResponse{
+			Workspaces: []ScannedWorkspace{},
+			BasePath:   basePath,
+		})
+		return
+	}
+
+	// Read directory entries
+	entries, err := os.ReadDir(basePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to read workspaces directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var workspaces []ScannedWorkspace
+
+	for _, entry := range entries {
+		// Only process directories
+		if !entry.IsDir() {
+			continue
+		}
+
+		// Skip hidden directories (except we're looking for .ubeworkspace inside them)
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		folderPath := filepath.Join(basePath, entry.Name())
+		configPath := filepath.Join(folderPath, ".ubeworkspace")
+
+		scannedWorkspace := ScannedWorkspace{
+			FolderName: entry.Name(),
+			FolderPath: folderPath,
+			HasConfig:  false,
+		}
+
+		// Check if .ubeworkspace file exists
+		if _, err := os.Stat(configPath); err == nil {
+			// Read and parse the config file
+			configData, err := os.ReadFile(configPath)
+			if err == nil {
+				var config WorkspaceConfig
+				if err := json.Unmarshal(configData, &config); err == nil {
+					scannedWorkspace.Config = &config
+					scannedWorkspace.HasConfig = true
+				}
+			}
+		}
+
+		workspaces = append(workspaces, scannedWorkspace)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ScanWorkspacesResponse{
+		Workspaces: workspaces,
+		BasePath:   basePath,
+	})
+}
+
+// HandleGetWorkspaceConfig handles GET /workspace-config/{folderPath}
+// Reads the .ubeworkspace file from a specific folder
+func (h *Handler) HandleGetWorkspaceConfig(w http.ResponseWriter, r *http.Request) {
+	folderPath := r.URL.Query().Get("path")
+	if folderPath == "" {
+		http.Error(w, "path query parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure path is within workspaces directory for security
+	if !strings.HasPrefix(folderPath, "workspaces") {
+		http.Error(w, "path must be within workspaces directory", http.StatusBadRequest)
+		return
+	}
+
+	configPath := filepath.Join(folderPath, ".ubeworkspace")
+
+	// Check if config file exists
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		http.Error(w, "workspace configuration file not found", http.StatusNotFound)
+		return
+	}
+
+	// Read the config file
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to read config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var config WorkspaceConfig
+	if err := json.Unmarshal(configData, &config); err != nil {
+		http.Error(w, fmt.Sprintf("failed to parse config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(config)
+}

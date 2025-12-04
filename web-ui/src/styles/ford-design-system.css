@@ -1,0 +1,378 @@
+/* Ford Design System - Material Based */
+/* Extracted from ubecode-design-system.html for React integration */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    /* Primary Ford Blues */
+    --ford-maastricht-blue: #081534;
+    --ford-dark-cerulean: #133A7C;
+    --ford-lapis-lazuli: #2A6BAC;
+    --ford-picton-blue: #47A8E5;
+
+    /* Neutrals */
+    --ford-white: #FFFFFF;
+    --ford-silver-sand: #C6C6C6;
+    --ford-slogan-gray: #3E5966;
+    --ford-text-primary: #212121;
+
+    /* Extended */
+    --ford-light-blue-tint: #E8F4FB;
+    --ford-extra-light-blue: #F5FAFD;
+
+    /* Semantic Colors */
+    --ford-success: #4caf50;
+    --ford-warning: #ff9800;
+    --ford-error: #f44336;
+    --ford-info: #47A8E5;
+
+    /* Spacing */
+    --spacing-xs: 8px;
+    --spacing-sm: 16px;
+    --spacing-md: 24px;
+    --spacing-lg: 32px;
+    --spacing-xl: 48px;
+    --spacing-2xl: 64px;
+}
+
+body {
+    font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    line-height: 1.6;
+    color: var(--ford-text-primary);
+    background: #fafafa;
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Header */
+header {
+    background: linear-gradient(135deg, var(--ford-maastricht-blue) 0%, var(--ford-dark-cerulean) 100%);
+    color: white;
+    padding: 60px 20px;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+header h1 {
+    font-size: 3rem;
+    font-weight: 400;
+    margin-bottom: 10px;
+    letter-spacing: 2px;
+}
+
+header p {
+    font-size: 1.2rem;
+    opacity: 0.9;
+}
+
+/* Navigation */
+nav {
+    background: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+nav ul {
+    list-style: none;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    padding: 0;
+    margin: 0;
+}
+
+nav li {
+    margin: 0;
+}
+
+nav a {
+    display: block;
+    padding: 16px 24px;
+    color: var(--ford-dark-cerulean);
+    text-decoration: none;
+    font-weight: 500;
+    transition: background 0.2s, color 0.2s;
+}
+
+nav a:hover,
+nav a.active {
+    background: var(--ford-light-blue-tint);
+    color: var(--ford-maastricht-blue);
+}
+
+/* Typography */
+h2 {
+    color: var(--ford-maastricht-blue);
+    font-size: 2rem;
+    font-weight: 400;
+    margin-bottom: 20px;
+    border-bottom: 2px solid var(--ford-picton-blue);
+    padding-bottom: 10px;
+}
+
+h3 {
+    color: var(--ford-dark-cerulean);
+    font-size: 1.5rem;
+    font-weight: 500;
+    margin: 30px 0 15px 0;
+}
+
+/* Buttons */
+.btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn:hover {
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    transform: translateY(-2px);
+}
+
+.btn-primary {
+    background: var(--ford-dark-cerulean);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: var(--ford-maastricht-blue);
+}
+
+.btn-secondary {
+    background: var(--ford-lapis-lazuli);
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: var(--ford-dark-cerulean);
+}
+
+.btn-accent {
+    background: var(--ford-picton-blue);
+    color: white;
+}
+
+.btn-accent:hover {
+    background: var(--ford-lapis-lazuli);
+}
+
+.btn-outlined {
+    background: transparent;
+    color: var(--ford-dark-cerulean);
+    border: 2px solid var(--ford-dark-cerulean);
+    box-shadow: none;
+}
+
+.btn-outlined:hover {
+    background: var(--ford-light-blue-tint);
+    box-shadow: none;
+}
+
+.btn-text {
+    background: transparent;
+    color: var(--ford-dark-cerulean);
+    box-shadow: none;
+}
+
+.btn-text:hover {
+    background: var(--ford-light-blue-tint);
+    box-shadow: none;
+}
+
+.btn-danger {
+    background: var(--ford-error);
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #d32f2f;
+}
+
+/* Button Sizes */
+.btn-sm {
+    padding: 8px 16px;
+    font-size: 0.75rem;
+}
+
+.btn-lg {
+    padding: 16px 32px;
+    font-size: 1rem;
+    transform: none;
+}
+
+/* Cards */
+.card {
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: box-shadow 0.3s;
+}
+
+.card:hover {
+    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+}
+
+.card-image {
+    height: 180px;
+    background: linear-gradient(135deg, var(--ford-picton-blue) 0%, var(--ford-lapis-lazuli) 100%);
+}
+
+.card-content {
+    padding: 20px;
+}
+
+.card-title {
+    font-size: 1.5rem;
+    font-weight: 500;
+    color: var(--ford-maastricht-blue);
+    margin-bottom: 10px;
+}
+
+.card-text {
+    color: #666;
+    margin-bottom: 15px;
+}
+
+/* Form Elements */
+.form-group {
+    margin: 20px 0;
+}
+
+label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--ford-dark-cerulean);
+    font-weight: 500;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+textarea,
+select {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid var(--ford-silver-sand);
+    border-radius: 4px;
+    font-size: 1rem;
+    font-family: inherit;
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+    outline: none;
+    border-color: var(--ford-lapis-lazuli);
+    box-shadow: 0 0 0 2px rgba(42, 107, 172, 0.1);
+}
+
+/* Alerts */
+.alert {
+    padding: 16px 20px;
+    border-radius: 4px;
+    margin: 20px 0;
+    border-left: 4px solid;
+}
+
+.alert-info {
+    background: var(--ford-light-blue-tint);
+    border-color: var(--ford-picton-blue);
+    color: var(--ford-dark-cerulean);
+}
+
+.alert-success {
+    background: #E8F5E9;
+    border-color: var(--ford-success);
+    color: #2E7D32;
+}
+
+.alert-warning {
+    background: #FFF3E0;
+    border-color: var(--ford-warning);
+    color: #E65100;
+}
+
+.alert-error {
+    background: #FFEBEE;
+    border-color: var(--ford-error);
+    color: #C62828;
+}
+
+/* Elevation/Shadows */
+.elevation-1 { box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
+.elevation-2 { box-shadow: 0 3px 6px rgba(0,0,0,0.16), 0 3px 6px rgba(0,0,0,0.23); }
+.elevation-3 { box-shadow: 0 10px 20px rgba(0,0,0,0.19), 0 6px 6px rgba(0,0,0,0.23); }
+.elevation-4 { box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22); }
+.elevation-5 { box-shadow: 0 19px 38px rgba(0,0,0,0.30), 0 15px 12px rgba(0,0,0,0.22); }
+
+/* Grid System */
+.grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 16px;
+}
+
+.col-12 { grid-column: span 12; }
+.col-6 { grid-column: span 6; }
+.col-4 { grid-column: span 4; }
+.col-3 { grid-column: span 3; }
+
+/* Ford Brand Elements */
+.ford-badge {
+    display: inline-block;
+    padding: 8px 16px;
+    background: var(--ford-dark-cerulean);
+    color: white;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    margin: 5px;
+}
+
+.go-further {
+    color: var(--ford-slogan-gray);
+    font-weight: 500;
+    font-style: italic;
+    font-size: 1.2rem;
+}
+
+/* Page Section */
+.page-section {
+    background: white;
+    margin: 30px 0;
+    padding: 40px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    header h1 { font-size: 2rem; }
+    nav ul { flex-direction: column; }
+    nav a { padding: 12px 16px; }
+    .page-section { padding: 20px; }
+    .col-6, .col-4, .col-3 { grid-column: span 12; }
+}

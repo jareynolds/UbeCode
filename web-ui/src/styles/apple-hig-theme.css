@@ -1,0 +1,576 @@
+/**
+ * Apple Human Interface Guidelines Theme
+ * Based on official Apple HIG specifications for iOS
+ *
+ * Design Principles:
+ * - SF Pro font family (system-ui stack for web)
+ * - iOS system colors with semantic naming
+ * - Typography scale based on iOS text styles
+ * - 8pt spacing grid system
+ * - Light mode focus (for web implementation)
+ *
+ * Sources:
+ * - https://developer.apple.com/design/human-interface-guidelines
+ * - iOS 13+ system colors (light mode)
+ * - SF Pro typography specifications
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@theme {
+  /* ============================================
+     iOS SYSTEM COLORS (Light Mode)
+     ============================================ */
+
+  /* Primary Label Colors */
+  --color-label: #000000;                    /* Primary text */
+  --color-label-secondary: rgba(60, 60, 67, 0.6);    /* Secondary text */
+  --color-label-tertiary: rgba(60, 60, 67, 0.3);     /* Tertiary text */
+  --color-label-quaternary: rgba(60, 60, 67, 0.18);  /* Quaternary text */
+
+  /* System Gray Scale */
+  --color-systemGray: #8e8e93;
+  --color-systemGray2: #aeaeb2;
+  --color-systemGray3: #c7c7cc;
+  --color-systemGray4: #d1d1d6;
+  --color-systemGray5: #e5e5ea;
+  --color-systemGray6: #f2f2f7;
+
+  /* System Backgrounds */
+  --color-systemBackground: #ffffff;          /* Primary background */
+  --color-systemBackground-secondary: #f2f2f7; /* Secondary background */
+
+  /* System Fill Colors */
+  --color-systemFill: rgba(120, 120, 128, 0.2);
+  --color-systemFill-secondary: rgba(120, 120, 128, 0.16);
+  --color-systemFill-tertiary: rgba(118, 118, 128, 0.12);
+  --color-systemFill-quaternary: rgba(116, 116, 128, 0.08);
+
+  /* iOS System Colors */
+  --color-systemBlue: #007AFF;
+  --color-systemGreen: #4CD964;
+  --color-systemIndigo: #5856D6;
+  --color-systemOrange: #FF9500;
+  --color-systemPink: #FF2D55;
+  --color-systemPurple: #AF52DE;
+  --color-systemRed: #FF3B30;
+  --color-systemTeal: #5AC8FA;
+  --color-systemYellow: #FFCC00;
+
+  /* ============================================
+     TAILWIND COLOR MAPPINGS
+     ============================================ */
+
+  /* Grey scale (mapped to systemGray) */
+  --color-grey-50: #f2f2f7;   /* systemGray6 */
+  --color-grey-100: #e5e5ea;  /* systemGray5 */
+  --color-grey-200: #d1d1d6;  /* systemGray4 */
+  --color-grey-300: #c7c7cc;  /* systemGray3 */
+  --color-grey-400: #aeaeb2;  /* systemGray2 */
+  --color-grey-500: #8e8e93;  /* systemGray */
+  --color-grey-600: #636366;  /* darker systemGray */
+  --color-grey-700: #48484a;  /* darker */
+  --color-grey-800: #3a3a3c;  /* darker */
+  --color-grey-900: #000000;  /* label */
+
+  /* Blue scale (mapped to systemBlue) */
+  --color-blue-50: #e5f2ff;
+  --color-blue-100: #cce5ff;
+  --color-blue-200: #99ccff;
+  --color-blue-300: #66b2ff;
+  --color-blue-400: #3399ff;
+  --color-blue-500: #007AFF;  /* systemBlue */
+  --color-blue-600: #0062cc;
+  --color-blue-700: #004999;
+  --color-blue-800: #003166;
+  --color-blue-900: #001833;
+
+  /* Indigo scale (mapped to systemIndigo) */
+  --color-indigo-50: #f0f0ff;
+  --color-indigo-100: #e0e0ff;
+  --color-indigo-200: #c2c1ff;
+  --color-indigo-300: #a3a2ff;
+  --color-indigo-400: #8583ff;
+  --color-indigo-500: #5856D6;  /* systemIndigo */
+  --color-indigo-600: #4645ab;
+  --color-indigo-700: #353480;
+  --color-indigo-800: #232255;
+  --color-indigo-900: #12112b;
+
+  /* Purple scale (mapped to systemPurple) */
+  --color-purple-50: #f9f0ff;
+  --color-purple-100: #f2e0ff;
+  --color-purple-200: #e5c2ff;
+  --color-purple-300: #d8a3ff;
+  --color-purple-400: #cb85ff;
+  --color-purple-500: #AF52DE;  /* systemPurple */
+  --color-purple-600: #8c42b2;
+  --color-purple-700: #693185;
+  --color-purple-800: #462159;
+  --color-purple-900: #23102c;
+
+  /* Orange scale (mapped to systemOrange) */
+  --color-orange-50: #fff7e5;
+  --color-orange-100: #ffefcc;
+  --color-orange-200: #ffdf99;
+  --color-orange-300: #ffcf66;
+  --color-orange-400: #ffbf33;
+  --color-orange-500: #FF9500;  /* systemOrange */
+  --color-orange-600: #cc7700;
+  --color-orange-700: #995900;
+  --color-orange-800: #663c00;
+  --color-orange-900: #331e00;
+
+  /* Green scale (mapped to systemGreen) */
+  --color-green-50: #e5f9ec;
+  --color-green-100: #ccf3d9;
+  --color-green-200: #99e7b3;
+  --color-green-300: #66db8d;
+  --color-green-400: #33cf67;
+  --color-green-500: #4CD964;  /* systemGreen */
+  --color-green-600: #3dae50;
+  --color-green-700: #2e823c;
+  --color-green-800: #1e5728;
+  --color-green-900: #0f2b14;
+
+  /* Red scale (mapped to systemRed) */
+  --color-red-50: #ffe5e3;
+  --color-red-100: #ffccc8;
+  --color-red-200: #ff9991;
+  --color-red-300: #ff665a;
+  --color-red-400: #ff3323;
+  --color-red-500: #FF3B30;  /* systemRed */
+  --color-red-600: #cc2f26;
+  --color-red-700: #99231d;
+  --color-red-800: #661813;
+  --color-red-900: #330c0a;
+}
+
+/* ============================================
+   APPLE HIG BASE STYLES
+   ============================================ */
+
+body {
+  /* SF Pro font stack with web-safe fallbacks */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+               system-ui, "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+
+  /* iOS Body text style: 17pt, Regular, 22pt leading */
+  font-size: 17px;
+  line-height: 1.294;  /* 22px / 17px = 1.294 */
+  font-weight: 400;
+  letter-spacing: -0.41px;  /* -2.5% of 17px */
+
+  color: var(--color-label);
+  background: var(--color-systemBackground);
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================
+   APPLE HIG TYPOGRAPHY
+   Based on iOS Text Styles
+   ============================================ */
+
+/* Large Title: 34pt, Regular, 41pt leading */
+h1,
+.text-large-title {
+  font-size: 34px;
+  line-height: 41px;
+  font-weight: 400;
+  letter-spacing: 0.37px;  /* +1.1% */
+  color: var(--color-label);
+}
+
+/* Title 1: 28pt, Regular, 34pt leading */
+h2,
+.text-title1 {
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 400;
+  letter-spacing: 0.36px;
+  color: var(--color-label);
+}
+
+/* Title 2: 22pt, Regular, 28pt leading */
+h3,
+.text-title2 {
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 400;
+  letter-spacing: 0.35px;
+  color: var(--color-label);
+}
+
+/* Title 3: 20pt, Regular, 25pt leading */
+h4,
+.text-title3 {
+  font-size: 20px;
+  line-height: 25px;
+  font-weight: 400;
+  letter-spacing: 0.38px;
+  color: var(--color-label);
+}
+
+/* Headline: 17pt, Semi-Bold, 22pt leading */
+h5,
+.text-headline {
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 600;
+  letter-spacing: -0.41px;
+  color: var(--color-label);
+}
+
+/* Body: 17pt, Regular, 22pt leading */
+p,
+.text-body {
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 400;
+  letter-spacing: -0.41px;
+  color: var(--color-label);
+}
+
+/* Callout: 16pt, Regular, 21pt leading */
+.text-callout {
+  font-size: 16px;
+  line-height: 21px;
+  font-weight: 400;
+  letter-spacing: -0.32px;
+  color: var(--color-label);
+}
+
+/* Subhead: 15pt, Regular, 20pt leading */
+h6,
+.text-subhead {
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 400;
+  letter-spacing: -0.24px;  /* -1.6% */
+  color: var(--color-label);
+}
+
+/* Footnote: 13pt, Regular, 18pt leading */
+.text-footnote {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+  letter-spacing: -0.08px;  /* -0.61% */
+  color: var(--color-label);
+}
+
+/* Caption 1: 12pt, Regular, 16pt leading */
+.text-caption1 {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--color-label);
+}
+
+/* Caption 2: 11pt, Regular, 13pt leading */
+.text-caption2 {
+  font-size: 11px;
+  line-height: 13px;
+  font-weight: 400;
+  letter-spacing: 0.07px;
+  color: var(--color-label);
+}
+
+/* ============================================
+   SEMANTIC TEXT COLORS
+   ============================================ */
+
+.text-primary {
+  color: var(--color-label);
+}
+
+.text-secondary {
+  color: var(--color-label-secondary);
+}
+
+.text-tertiary {
+  color: var(--color-label-tertiary);
+}
+
+.text-quaternary {
+  color: var(--color-label-quaternary);
+}
+
+/* ============================================
+   APPLE HIG CARDS
+   Based on iOS card styling
+   ============================================ */
+
+.card {
+  background: var(--color-systemBackground);
+  border-radius: 10px;  /* iOS standard corner radius */
+  overflow: hidden;
+
+  /* iOS-style shadow */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12),
+              0 1px 2px rgba(0, 0, 0, 0.08);
+
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.card:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.16),
+              0 2px 4px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+
+.card-content {
+  padding: 16px;  /* iOS standard padding */
+}
+
+/* ============================================
+   APPLE HIG BUTTONS
+   Based on iOS button styling
+   ============================================ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;  /* iOS button radius */
+
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 600;
+  letter-spacing: -0.41px;
+
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Primary button - systemBlue */
+.btn-primary {
+  background: var(--button-primary-bg, var(--color-primary, var(--color-systemBlue)));
+  color: var(--button-primary-color, white);
+  border-radius: var(--button-border-radius, 8px);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--button-primary-hover, #0062cc);
+  transform: scale(1.02);
+}
+
+.btn-primary:active:not(:disabled) {
+  background: var(--button-primary-hover, #004999);
+  transform: scale(0.98);
+}
+
+/* Secondary button - systemGray fill */
+.btn-secondary {
+  background: var(--button-secondary-bg, var(--color-systemFill));
+  color: var(--button-secondary-color, var(--color-label));
+  border-radius: var(--button-border-radius, 8px);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--button-secondary-hover, var(--color-systemFill-secondary));
+}
+
+.btn-secondary:active:not(:disabled) {
+  background: var(--button-secondary-hover, var(--color-systemFill-tertiary));
+}
+
+/* Outline button */
+.btn-outline {
+  background: transparent;
+  color: var(--color-systemBlue);
+  border: 1px solid var(--color-systemGray4);
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: var(--color-systemFill-quaternary);
+  border-color: var(--color-systemGray3);
+}
+
+/* Text/Ghost button */
+.btn-ghost {
+  background: transparent;
+  color: var(--color-systemBlue);
+  padding: 8px 12px;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--color-systemFill-quaternary);
+}
+
+.btn-ghost:active:not(:disabled) {
+  background: var(--color-systemFill-tertiary);
+}
+
+/* ============================================
+   APPLE HIG FORM INPUTS
+   Based on iOS form styling
+   ============================================ */
+
+.input,
+textarea.input,
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+textarea,
+select {
+  width: 100%;
+  padding: 11px 16px;
+
+  background: var(--color-systemBackground-secondary);
+  border: 1px solid var(--color-systemGray4);
+  border-radius: 10px;
+
+  font-family: inherit;
+  font-size: 17px;
+  line-height: 22px;
+  letter-spacing: -0.41px;
+  color: var(--color-label);
+
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.input::placeholder,
+textarea::placeholder {
+  color: var(--color-label-tertiary);
+}
+
+.input:hover:not(:disabled) {
+  border-color: var(--color-systemGray3);
+}
+
+.input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--color-systemBlue);
+  background: var(--color-systemBackground);
+}
+
+.input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--color-systemGray6);
+}
+
+/* Label */
+.label,
+label {
+  display: block;
+  margin-bottom: 8px;
+
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 400;
+  letter-spacing: -0.24px;
+  color: var(--color-label-secondary);
+}
+
+/* ============================================
+   BACKGROUNDS & FILLS
+   ============================================ */
+
+.bg-primary {
+  background-color: var(--color-systemBackground);
+}
+
+.bg-secondary {
+  background-color: var(--color-systemBackground-secondary);
+}
+
+.bg-fill {
+  background-color: var(--color-systemFill);
+}
+
+.bg-fill-secondary {
+  background-color: var(--color-systemFill-secondary);
+}
+
+/* ============================================
+   APPLE HIG SPACING SYSTEM
+   8pt grid system
+   ============================================ */
+
+:root {
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+  --spacing-10: 40px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+}
+
+/* ============================================
+   APPLE HIG ALERTS/NOTIFICATIONS
+   ============================================ */
+
+.alert {
+  padding: 16px;
+  border-radius: 10px;
+  margin: 16px 0;
+}
+
+.alert-info {
+  background: rgba(0, 122, 255, 0.1);
+  color: var(--color-systemBlue);
+  border-left: 4px solid var(--color-systemBlue);
+}
+
+.alert-success {
+  background: rgba(76, 217, 100, 0.1);
+  color: var(--color-systemGreen);
+  border-left: 4px solid var(--color-systemGreen);
+}
+
+.alert-warning {
+  background: rgba(255, 149, 0, 0.1);
+  color: var(--color-systemOrange);
+  border-left: 4px solid var(--color-systemOrange);
+}
+
+.alert-error {
+  background: rgba(255, 59, 48, 0.1);
+  color: var(--color-systemRed);
+  border-left: 4px solid var(--color-systemRed);
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+.text-center {
+  text-align: center;
+}
+
+.rounded-ios {
+  border-radius: 10px;
+}
+
+.shadow-ios {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12),
+              0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.shadow-ios-lg {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.16),
+              0 2px 4px rgba(0, 0, 0, 0.12);
+}

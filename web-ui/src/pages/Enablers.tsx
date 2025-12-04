@@ -1,0 +1,2394 @@
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Card, Alert, Button, ConfirmDialog } from '../components';
+import { useEnabler } from '../context/EnablerContext';
+import { useWorkspace } from '../context/WorkspaceContext';
+
+// File-based capability from workspace definition folder
+interface FileCapability {
+  filename: string;
+  path: string;
+  name: string;
+  description: string;
+  status: string;
+  capabilityId: string;
+}
+
+// File-based enabler from workspace definition folder
+interface FileEnabler {
+  filename: string;
+  path: string;
+  name: string;
+  purpose: string;
+  status: string;
+  owner: string;
+  priority: string;
+  capabilityId: string;
+  enablerId: string;
+}
+import {
+  type Enabler,
+  type EnablerRequirement,
+  type AcceptanceCriteria,
+  type CreateEnablerRequest,
+  type UpdateEnablerRequest,
+  type CreateRequirementRequest,
+  type CriteriaFormat,
+  type CriteriaPriority,
+  type RequirementType,
+  type RequirementPriority,
+  type EnablerSpecification,
+  getEnablerStatusDisplayName,
+  getEnablerStatusColor,
+  getRequirementTypeDisplayName,
+  getRequirementPriorityDisplayName,
+  getRequirementPriorityColor,
+  getCriteriaFormatDisplayName,
+  getCriteriaStatusDisplayName,
+  getCriteriaStatusColor,
+  getCriteriaPriorityDisplayName,
+  generateId,
+  getSpecificationStatusColor,
+  getSpecificationApprovalColor,
+} from '../api/enablerService';
+
+export const Enablers: React.FC = () => {
+  const {
+    enablers,
+    selectedEnabler,
+    requirements,
+    acceptanceCriteria,
+    criteriaSummary,
+    isLoading,
+    error,
+    loadEnablers,
+    loadEnabler,
+    createEnabler,
+    updateEnabler,
+    deleteEnabler,
+    createRequirement,
+    updateRequirement,
+    deleteRequirement,
+    verifyRequirement,
+    loadCriteria,
+    loadCriteriaSummary,
+    createCriteria,
+    updateCriteria,
+    deleteCriteria,
+    verifyCriteria,
+    clearError,
+    clearSelection,
+    // Specification state (persists across navigation)
+    specifications,
+    isAnalyzing,
+    analyzeError,
+    loadSpecifications,
+    deleteSpecification,
+    updateSpecification,
+    reorderSpecifications,
+    clearAnalyzeError,
+  } = useEnabler();
+
+  const { currentWorkspace } = useWorkspace();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [capabilities, setCapabilities] = useState<FileCapability[]>([]);
+  const [loadingCapabilities, setLoadingCapabilities] = useState(false);
+  const [fileEnablers, setFileEnablers] = useState<FileEnabler[]>([]);
+  const [loadingFileEnablers, setLoadingFileEnablers] = useState(false);
+  const [selectedCapabilityId, setSelectedCapabilityId] = useState<string | null>(null);
+  // Separate state for the capability selection in the enabler form (doesn't affect main filter)
+  const [formCapabilityId, setFormCapabilityId] = useState<string | null>(null);
+  // AI-suggested capability state
+  const [suggestedCapabilityId, setSuggestedCapabilityId] = useState<string | null>(null);
+  const [isCapabilitySuggesting, setIsCapabilitySuggesting] = useState(false);
+  const [capabilityNeedsConfirmation, setCapabilityNeedsConfirmation] = useState(false);
+  const [showEnablerForm, setShowEnablerForm] = useState(false);
+  const [showRequirementForm, setShowRequirementForm] = useState(false);
+  const [showCriteriaForm, setShowCriteriaForm] = useState(false);
+  const [editingEnabler, setEditingEnabler] = useState<Enabler | null>(null);
+  const [editingRequirement, setEditingRequirement] = useState<EnablerRequirement | null>(null);
+  const [editingCriteria, setEditingCriteria] = useState<AcceptanceCriteria | null>(null);
+
+  // Selected specification for detail view (local state, doesn't need persistence)
+  const [selectedSpecification, setSelectedSpecification] = useState<EnablerSpecification | null>(null);
+
+  // Editing specification state
+  const [editingSpecification, setEditingSpecification] = useState<EnablerSpecification | null>(null);
+
+  // Editing file-based enabler state
+  const [editingFileEnabler, setEditingFileEnabler] = useState<FileEnabler | null>(null);
+
+  // Drag and drop state
+  const [draggedSpecIndex, setDraggedSpecIndex] = useState<number | null>(null);
+
+  // Inline requirement for enabler form
+  interface InlineRequirement {
+    id: string;
+    name: string;
+    description: string;
+    type: 'functional' | 'non_functional';
+    priority: string;
+    status: string;
+    nfrCategory?: string;
+  }
+
+  // Form states
+  const [enablerFormData, setEnablerFormData] = useState<Partial<CreateEnablerRequest>>({
+    enabler_id: '',
+    capability_id: 0,
+    name: '',
+    purpose: '',
+    owner: '',
+    priority: 'medium',
+  });
+
+  // Inline requirements for enabler creation
+  const [inlineRequirements, setInlineRequirements] = useState<InlineRequirement[]>([]);
+
+  const [requirementFormData, setRequirementFormData] = useState<Partial<CreateRequirementRequest>>({
+    requirement_id: '',
+    enabler_id: 0,
+    name: '',
+    description: '',
+    requirement_type: 'functional',
+    priority: 'should_have',
+    notes: '',
+  });
+
+  const [criteriaFormData, setCriteriaFormData] = useState({
+    criteria_id: '',
+    title: '',
+    description: '',
+    criteria_format: 'checklist' as CriteriaFormat,
+    given_clause: '',
+    when_clause: '',
+    then_clause: '',
+    metric_name: '',
+    metric_target: '',
+    priority: 'must' as CriteriaPriority,
+  });
+
+  // Confirmation dialog state
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    confirmVariant?: 'primary' | 'danger';
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
+
+  const closeConfirmDialog = () => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+  };
+
+  // Load capabilities and file enablers when workspace changes or on mount
+  useEffect(() => {
+    if (currentWorkspace?.projectFolder) {
+      loadCapabilities();
+      loadFileEnablers();
+    }
+  }, [currentWorkspace?.projectFolder]);
+
+  // Also load on initial mount if workspace is already set
+  useEffect(() => {
+    if (currentWorkspace?.projectFolder) {
+      loadCapabilities();
+      loadFileEnablers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Load enablers when capability is selected (using capability ID string for file-based capabilities)
+  useEffect(() => {
+    if (selectedCapabilityId) {
+      // For file-based capabilities, we use the capability ID string
+      // The enabler context needs to handle this appropriately
+      const numericId = parseInt(selectedCapabilityId) || 0;
+      if (numericId > 0) {
+        loadEnablers(numericId);
+      }
+    }
+  }, [selectedCapabilityId, loadEnablers]);
+
+  // Load criteria when enabler is selected
+  useEffect(() => {
+    if (selectedEnabler) {
+      loadCriteria('enabler', selectedEnabler.id);
+      loadCriteriaSummary('enabler', selectedEnabler.id);
+    }
+  }, [selectedEnabler, loadCriteria, loadCriteriaSummary]);
+
+  // Handle opening a specific item from URL parameter
+  useEffect(() => {
+    const openItem = searchParams.get('open');
+    if (openItem && fileEnablers.length > 0 && !editingFileEnabler) {
+      // Find an enabler with matching filename
+      const matchingEnabler = fileEnablers.find(e => e.filename === openItem);
+      if (matchingEnabler) {
+        setEditingFileEnabler(matchingEnabler);
+        // Scroll to the enabler section
+        setTimeout(() => {
+          const element = document.getElementById(`enabler-${matchingEnabler.filename}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 100);
+      }
+      // Clear the search param after attempting to open
+      setSearchParams({}, { replace: true });
+    }
+  }, [fileEnablers, searchParams, editingFileEnabler, setSearchParams]);
+
+  // Load capabilities from workspace's definition folder (CAP-*.md files)
+  const loadCapabilities = async () => {
+    if (!currentWorkspace?.projectFolder) {
+      setCapabilities([]);
+      return;
+    }
+
+    setLoadingCapabilities(true);
+    try {
+      const response = await fetch('http://localhost:9080/capability-files', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspacePath: currentWorkspace.projectFolder,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Filter to only include CAP-*.md files and map to FileCapability interface
+        const caps: FileCapability[] = (data.capabilities || [])
+          .filter((cap: any) => cap.filename?.startsWith('CAP-'))
+          .map((cap: any) => ({
+            filename: cap.filename,
+            path: cap.path,
+            name: cap.name || cap.filename.replace(/\.md$/, ''),
+            description: cap.description || '',
+            status: cap.status || '',
+            capabilityId: cap.fields?.['ID'] || cap.filename.replace(/\.md$/, ''),
+          }));
+        setCapabilities(caps);
+      }
+    } catch (err) {
+      console.error('Failed to load capabilities from workspace:', err);
+      setCapabilities([]);
+    } finally {
+      setLoadingCapabilities(false);
+    }
+  };
+
+  // Load enablers from workspace's definition folder (ENB-*.md files)
+  const loadFileEnablers = async () => {
+    if (!currentWorkspace?.projectFolder) {
+      setFileEnablers([]);
+      return;
+    }
+
+    setLoadingFileEnablers(true);
+    try {
+      const response = await fetch('http://localhost:9080/enabler-files', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspacePath: currentWorkspace.projectFolder,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Filter to only include ENB-*.md files
+        const enbs: FileEnabler[] = (data.enablers || [])
+          .filter((enb: any) => enb.filename?.startsWith('ENB-'))
+          .map((enb: any) => ({
+            filename: enb.filename,
+            path: enb.path,
+            name: enb.name || enb.filename.replace(/\.md$/, ''),
+            purpose: enb.purpose || '',
+            status: enb.status || '',
+            owner: enb.owner || '',
+            priority: enb.priority || 'medium',
+            capabilityId: enb.capabilityId || '',
+            enablerId: enb.enablerId || enb.filename.replace(/\.md$/, ''),
+          }));
+        setFileEnablers(enbs);
+      }
+    } catch (err) {
+      console.error('Failed to load enablers from workspace:', err);
+      setFileEnablers([]);
+    } finally {
+      setLoadingFileEnablers(false);
+    }
+  };
+
+  // Enabler handlers
+  const handleCreateEnabler = () => {
+    setEditingEnabler(null);
+    setEditingFileEnabler(null);
+    // Reset AI suggestion state
+    setSuggestedCapabilityId(null);
+    setCapabilityNeedsConfirmation(false);
+    setIsCapabilitySuggesting(false);
+    // Initialize form capability from the selected filter
+    setFormCapabilityId(selectedCapabilityId);
+    // For file-based capabilities, we store the capability ID string
+    // The numeric capability_id is 0 since we're using file-based references
+    setEnablerFormData({
+      enabler_id: generateId('ENB'),
+      capability_id: 0, // Use 0 for file-based capabilities
+      name: '',
+      purpose: '',
+      owner: '',
+      priority: 'medium',
+    });
+    setInlineRequirements([]); // Reset inline requirements
+    setShowEnablerForm(true);
+  };
+
+  // Edit file-based enabler
+  const handleEditFileEnabler = async (enabler: FileEnabler) => {
+    setEditingEnabler(null);
+    setEditingFileEnabler(enabler);
+
+    // Reset AI suggestion state
+    setSuggestedCapabilityId(null);
+    setCapabilityNeedsConfirmation(false);
+
+    // Set the capability ID for the form dropdown (NOT the main filter)
+    setFormCapabilityId(enabler.capabilityId || null);
+
+    // Populate form with existing enabler data
+    setEnablerFormData({
+      enabler_id: enabler.enablerId || '',
+      capability_id: 0,
+      name: enabler.name || '',
+      purpose: enabler.purpose || '',
+      owner: enabler.owner || '',
+      priority: (enabler.priority as any) || 'medium',
+    });
+
+    // Try to load requirements from the file
+    // For now, we'll start with empty requirements since they need to be parsed from the file
+    // In a future enhancement, we could fetch and parse the markdown to extract requirements
+    setInlineRequirements([]);
+
+    setShowEnablerForm(true);
+
+    // Trigger AI capability suggestion
+    if (enabler.name) {
+      suggestBestCapability(enabler.name, enabler.purpose || '');
+    }
+  };
+
+  // Add inline requirement during enabler creation
+  const handleAddInlineRequirement = () => {
+    const newReq: InlineRequirement = {
+      id: generateId('FR'),
+      name: '',
+      description: '',
+      type: 'functional',
+      priority: 'should_have',
+      status: 'Draft',
+      nfrCategory: undefined,
+    };
+    setInlineRequirements([...inlineRequirements, newReq]);
+  };
+
+  // Update inline requirement
+  const handleUpdateInlineRequirement = (index: number, field: string, value: string) => {
+    const updated = [...inlineRequirements];
+    if (field === 'type') {
+      // Update ID prefix when type changes
+      const newId = value === 'functional' ? generateId('FR') : generateId('NFR');
+      updated[index] = { ...updated[index], [field]: value, id: newId };
+    } else {
+      updated[index] = { ...updated[index], [field]: value };
+    }
+    setInlineRequirements(updated);
+  };
+
+  // Remove inline requirement
+  const handleRemoveInlineRequirement = (index: number) => {
+    setInlineRequirements(inlineRequirements.filter((_, i) => i !== index));
+  };
+
+  // Get the selected capability name for display
+  const getSelectedCapabilityName = () => {
+    const cap = capabilities.find(c => c.capabilityId === selectedCapabilityId);
+    return cap ? `${cap.capabilityId} - ${cap.name}` : selectedCapabilityId || '';
+  };
+
+  // AI-powered capability matching
+  const suggestBestCapability = async (enablerName: string, enablerPurpose: string) => {
+    if (capabilities.length === 0 || !currentWorkspace?.projectFolder) return;
+
+    setIsCapabilitySuggesting(true);
+    setCapabilityNeedsConfirmation(false);
+
+    try {
+      // Build a prompt for Claude to match the enabler to the best capability
+      const capabilityList = capabilities.map(cap =>
+        `- ${cap.capabilityId}: ${cap.name}${cap.description ? ` - ${cap.description}` : ''}`
+      ).join('\n');
+
+      const prompt = `Given an enabler with the following details:
+Name: ${enablerName}
+Purpose: ${enablerPurpose || 'Not specified'}
+
+And the following available capabilities:
+${capabilityList}
+
+Which capability ID is the BEST match for this enabler?
+Respond with ONLY the capability ID (e.g., "CAP-123456") and nothing else. If no good match exists, respond with "NONE".`;
+
+      const response = await fetch('http://localhost:9080/ai-chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: prompt,
+          workspacePath: currentWorkspace.projectFolder,
+          apiKey: localStorage.getItem('anthropic_api_key') || '',
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+
+        // Check for error in response
+        if (data.error) {
+          console.error('AI chat error:', data.error);
+          return;
+        }
+
+        const suggestedId = data.response?.trim();
+
+        // Validate the suggested ID exists in our capabilities
+        if (suggestedId && suggestedId !== 'NONE') {
+          // Extract just the CAP-XXXXXX part if there's extra text
+          const capMatch = suggestedId.match(/CAP-\d+/i);
+          const cleanId = capMatch ? capMatch[0].toUpperCase() : suggestedId.toUpperCase();
+
+          const matchingCap = capabilities.find(c =>
+            c.capabilityId.toUpperCase() === cleanId
+          );
+
+          if (matchingCap) {
+            setSuggestedCapabilityId(matchingCap.capabilityId);
+            setFormCapabilityId(matchingCap.capabilityId);
+            setCapabilityNeedsConfirmation(true);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to get AI capability suggestion:', err);
+    } finally {
+      setIsCapabilitySuggesting(false);
+    }
+  };
+
+  // Confirm the AI-suggested capability
+  const confirmCapabilitySuggestion = () => {
+    setCapabilityNeedsConfirmation(false);
+  };
+
+  const handleEditEnabler = (enabler: Enabler) => {
+    setEditingEnabler(enabler);
+    setEnablerFormData({
+      enabler_id: enabler.enabler_id,
+      capability_id: enabler.capability_id,
+      name: enabler.name,
+      purpose: enabler.purpose || '',
+      owner: enabler.owner || '',
+      priority: enabler.priority,
+    });
+    setShowEnablerForm(true);
+  };
+
+  const handleSaveEnabler = async () => {
+    try {
+      if (!currentWorkspace?.projectFolder) {
+        throw new Error('Workspace folder not configured. Please set a project folder in Workspaces.');
+      }
+
+      // If editing existing enabler, use the original filename; otherwise generate new one
+      let fileName: string;
+      if (editingFileEnabler) {
+        fileName = editingFileEnabler.filename;
+      } else {
+        // Generate filename from enabler ID + first 3 words of name
+        const nameSlug = (enablerFormData.name || '')
+          .toLowerCase()
+          .split(/\s+/)
+          .slice(0, 3)
+          .join('-')
+          .replace(/[^a-z0-9-]/g, '');
+        fileName = `${enablerFormData.enabler_id}-${nameSlug}.md`;
+      }
+
+      // Find the capability name for reference
+      const capability = capabilities.find(c => c.capabilityId === formCapabilityId);
+      const capabilityName = capability?.name || formCapabilityId || 'Unknown';
+
+      // Generate markdown content
+      let markdown = `# ${enablerFormData.name}\n\n`;
+      markdown += `## Metadata\n`;
+      markdown += `- **ID**: ${enablerFormData.enabler_id}\n`;
+      markdown += `- **Type**: Enabler\n`;
+      markdown += `- **Capability**: ${capabilityName} (${formCapabilityId})\n`;
+      markdown += `- **Owner**: ${enablerFormData.owner || 'Not specified'}\n`;
+      markdown += `- **Priority**: ${enablerFormData.priority || 'medium'}\n`;
+      markdown += `- **Status**: planned\n`;
+      markdown += `- **Created**: ${new Date().toLocaleString()}\n\n`;
+
+      if (enablerFormData.purpose) {
+        markdown += `## Purpose\n${enablerFormData.purpose}\n\n`;
+      }
+
+      // Add Functional Requirements section
+      const functionalReqs = inlineRequirements.filter(r => r.type === 'functional');
+      markdown += `## Functional Requirements\n`;
+      if (functionalReqs.length > 0) {
+        markdown += `| ID | Name | Requirement | Status | Priority | Approval |\n`;
+        markdown += `|----|------|-------------|--------|----------|----------|\n`;
+        functionalReqs.forEach(req => {
+          markdown += `| ${req.id} | ${req.name} | ${req.description} | ${req.status} | ${req.priority} | Pending |\n`;
+        });
+      } else {
+        markdown += `_No functional requirements defined yet._\n`;
+      }
+      markdown += `\n`;
+
+      // Add Non-Functional Requirements section
+      const nonFunctionalReqs = inlineRequirements.filter(r => r.type === 'non_functional');
+      markdown += `## Non-Functional Requirements\n`;
+      if (nonFunctionalReqs.length > 0) {
+        markdown += `| ID | Name | Requirement | Type | Status | Priority | Approval |\n`;
+        markdown += `|----|------|-------------|------|--------|----------|----------|\n`;
+        nonFunctionalReqs.forEach(req => {
+          markdown += `| ${req.id} | ${req.name} | ${req.description} | ${req.nfrCategory || 'General'} | ${req.status} | ${req.priority} | Pending |\n`;
+        });
+      } else {
+        markdown += `_No non-functional requirements defined yet._\n`;
+      }
+      markdown += `\n`;
+
+      markdown += `## Acceptance Criteria\n_No acceptance criteria defined yet._\n`;
+
+      // Save to definition folder
+      const response = await fetch('http://localhost:9080/save-specifications', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspacePath: currentWorkspace.projectFolder,
+          files: [{ fileName, content: markdown }],
+          subfolder: 'definition'
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to save enabler');
+      }
+
+      setShowEnablerForm(false);
+      setEditingEnabler(null);
+      setEditingFileEnabler(null); // Clear editing state for file-based enablers
+      setInlineRequirements([]); // Clear inline requirements
+      // Reload file enablers to show the new/updated enabler
+      loadFileEnablers();
+    } catch (err) {
+      console.error('Failed to save enabler:', err);
+      alert(err instanceof Error ? err.message : 'Failed to save enabler');
+    }
+  };
+
+  // Delete file-based enabler
+  const handleDeleteFileEnabler = (enabler: FileEnabler) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Enabler',
+      message: `Are you sure you want to delete "${enabler.name}"? This will delete the file ${enabler.filename} from the definition folder.`,
+      confirmLabel: 'Delete',
+      confirmVariant: 'danger',
+      onConfirm: async () => {
+        closeConfirmDialog();
+        try {
+          const response = await fetch('http://localhost:9080/delete-specification', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              path: enabler.path,
+            }),
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Failed to delete enabler');
+          }
+
+          // Reload file enablers
+          loadFileEnablers();
+        } catch (err) {
+          console.error('Failed to delete enabler:', err);
+          alert(err instanceof Error ? err.message : 'Failed to delete enabler');
+        }
+      },
+    });
+  };
+
+  const handleDeleteEnabler = (id: number) => {
+    const enabler = enablers.find(e => e.id === id);
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Enabler',
+      message: `Are you sure you want to delete "${enabler?.name || 'this enabler'}"?`,
+      confirmLabel: 'Delete',
+      confirmVariant: 'danger',
+      onConfirm: async () => {
+        closeConfirmDialog();
+        try {
+          await deleteEnabler(id);
+        } catch (err) {
+          console.error('Failed to delete enabler:', err);
+        }
+      },
+    });
+  };
+
+  // Requirement handlers
+  const handleCreateRequirement = () => {
+    if (!selectedEnabler) return;
+    setEditingRequirement(null);
+    setRequirementFormData({
+      requirement_id: generateId('FR'),
+      enabler_id: selectedEnabler.id,
+      name: '',
+      description: '',
+      requirement_type: 'functional',
+      priority: 'should_have',
+      notes: '',
+    });
+    setShowRequirementForm(true);
+  };
+
+  const handleSaveRequirement = async () => {
+    try {
+      if (editingRequirement) {
+        await updateRequirement(editingRequirement.id, requirementFormData);
+      } else {
+        await createRequirement(requirementFormData as CreateRequirementRequest);
+      }
+      setShowRequirementForm(false);
+      setEditingRequirement(null);
+    } catch (err) {
+      console.error('Failed to save requirement:', err);
+    }
+  };
+
+  const handleVerifyRequirement = async (req: EnablerRequirement) => {
+    try {
+      await verifyRequirement(req.id, {
+        completed: !req.completed,
+        notes: `Verification status changed on ${new Date().toLocaleString()}`,
+      });
+    } catch (err) {
+      console.error('Failed to verify requirement:', err);
+    }
+  };
+
+  // Acceptance Criteria handlers
+  const handleCreateCriteria = () => {
+    if (!selectedEnabler) return;
+    setEditingCriteria(null);
+    setCriteriaFormData({
+      criteria_id: generateId('AC'),
+      title: '',
+      description: '',
+      criteria_format: 'checklist',
+      given_clause: '',
+      when_clause: '',
+      then_clause: '',
+      metric_name: '',
+      metric_target: '',
+      priority: 'must',
+    });
+    setShowCriteriaForm(true);
+  };
+
+  const handleSaveCriteria = async () => {
+    if (!selectedEnabler) return;
+    try {
+      if (editingCriteria) {
+        await updateCriteria(editingCriteria.id, criteriaFormData);
+      } else {
+        await createCriteria('enabler', selectedEnabler.id, criteriaFormData);
+      }
+      setShowCriteriaForm(false);
+      setEditingCriteria(null);
+    } catch (err) {
+      console.error('Failed to save criteria:', err);
+    }
+  };
+
+  const handleVerifyCriteria = async (criteria: AcceptanceCriteria, status: 'passed' | 'failed' | 'blocked' | 'skipped') => {
+    try {
+      await verifyCriteria(criteria.id, {
+        status,
+        verification_notes: `Status changed to ${status} on ${new Date().toLocaleString()}`,
+      });
+    } catch (err) {
+      console.error('Failed to verify criteria:', err);
+    }
+  };
+
+  // Analyze specifications handler - uses context for persistence
+  const handleAnalyzeSpecifications = async () => {
+    await loadSpecifications();
+  };
+
+  // Delete specification handler
+  const handleDeleteSpecification = (spec: EnablerSpecification) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Specification',
+      message: `Are you sure you want to delete "${spec.name}"? This will delete the file ${spec.fileName} from the specifications folder.`,
+      confirmLabel: 'Delete',
+      confirmVariant: 'danger',
+      onConfirm: async () => {
+        closeConfirmDialog();
+        try {
+          await deleteSpecification(spec.fileName);
+        } catch (err) {
+          console.error('Failed to delete specification:', err);
+        }
+      },
+    });
+  };
+
+  // Edit specification handler
+  const handleEditSpecification = (spec: EnablerSpecification) => {
+    setEditingSpecification({ ...spec });
+  };
+
+  // Save edited specification
+  const handleSaveSpecification = async () => {
+    if (!editingSpecification) return;
+    try {
+      await updateSpecification(editingSpecification);
+      setEditingSpecification(null);
+    } catch (err) {
+      console.error('Failed to save specification:', err);
+    }
+  };
+
+  // Drag and drop handlers
+  const handleDragStart = (index: number) => {
+    setDraggedSpecIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedSpecIndex === null || draggedSpecIndex === index) return;
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    if (draggedSpecIndex === null || draggedSpecIndex === targetIndex) return;
+    reorderSpecifications(draggedSpecIndex, targetIndex);
+    setDraggedSpecIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedSpecIndex(null);
+  };
+
+  // Render specification detail modal
+  const renderSpecificationDetail = () => {
+    if (!selectedSpecification) return null;
+    return (
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 1000,
+      }}>
+        <Card style={{ maxWidth: '900px', width: '100%', maxHeight: '85vh', overflow: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '16px' }}>
+            <div>
+              <h2 className="text-title1">{selectedSpecification.name}</h2>
+              <p className="text-footnote text-secondary">{selectedSpecification.id}</p>
+            </div>
+            <button
+              onClick={() => setSelectedSpecification(null)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '24px', color: 'var(--color-secondaryLabel)' }}
+            >
+              x
+            </button>
+          </div>
+
+          {/* Metadata */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+            gap: '12px',
+            marginBottom: '24px',
+            padding: '16px',
+            backgroundColor: 'var(--color-tertiarySystemBackground)',
+            borderRadius: '8px',
+          }}>
+            <div>
+              <p className="text-caption2 text-tertiary">Capability</p>
+              <p className="text-subheadline">{selectedSpecification.capabilityId || 'N/A'}</p>
+            </div>
+            <div>
+              <p className="text-caption2 text-tertiary">Status</p>
+              <span style={{
+                padding: '2px 8px',
+                fontSize: '11px',
+                fontWeight: 600,
+                borderRadius: '8px',
+                backgroundColor: `${getSpecificationStatusColor(selectedSpecification.status)}20`,
+                color: getSpecificationStatusColor(selectedSpecification.status),
+              }}>
+                {selectedSpecification.status}
+              </span>
+            </div>
+            <div>
+              <p className="text-caption2 text-tertiary">Approval</p>
+              <span style={{
+                padding: '2px 8px',
+                fontSize: '11px',
+                fontWeight: 600,
+                borderRadius: '8px',
+                backgroundColor: `${getSpecificationApprovalColor(selectedSpecification.approval)}20`,
+                color: getSpecificationApprovalColor(selectedSpecification.approval),
+              }}>
+                {selectedSpecification.approval}
+              </span>
+            </div>
+            <div>
+              <p className="text-caption2 text-tertiary">Priority</p>
+              <p className="text-subheadline">{selectedSpecification.priority}</p>
+            </div>
+            <div>
+              <p className="text-caption2 text-tertiary">Owner</p>
+              <p className="text-subheadline">{selectedSpecification.owner || 'N/A'}</p>
+            </div>
+            <div>
+              <p className="text-caption2 text-tertiary">File</p>
+              <p className="text-subheadline">{selectedSpecification.fileName}</p>
+            </div>
+          </div>
+
+          {/* Purpose */}
+          {selectedSpecification.purpose && (
+            <div style={{ marginBottom: '24px' }}>
+              <h4 className="text-title3" style={{ marginBottom: '8px' }}>Purpose</h4>
+              <p className="text-body">{selectedSpecification.purpose}</p>
+            </div>
+          )}
+
+          {/* Functional Requirements */}
+          {selectedSpecification.functionalRequirements.length > 0 && (
+            <div style={{ marginBottom: '24px' }}>
+              <h4 className="text-title3" style={{ marginBottom: '12px' }}>
+                Functional Requirements ({selectedSpecification.functionalRequirements.length})
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {selectedSpecification.functionalRequirements.map((req, idx) => (
+                  <div key={idx} style={{
+                    padding: '12px',
+                    border: '1px solid var(--color-separator)',
+                    borderRadius: '8px',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                      <div>
+                        <span className="text-footnote text-secondary" style={{ marginRight: '8px' }}>{req.id}</span>
+                        <span className="text-headline">{req.name}</span>
+                      </div>
+                      {req.status && (
+                        <span style={{
+                          padding: '2px 8px',
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          borderRadius: '8px',
+                          backgroundColor: `${getSpecificationStatusColor(req.status)}20`,
+                          color: getSpecificationStatusColor(req.status),
+                        }}>
+                          {req.status}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-body text-secondary" style={{ marginTop: '4px' }}>{req.requirement}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Non-Functional Requirements */}
+          {selectedSpecification.nonFunctionalRequirements.length > 0 && (
+            <div style={{ marginBottom: '24px' }}>
+              <h4 className="text-title3" style={{ marginBottom: '12px' }}>
+                Non-Functional Requirements ({selectedSpecification.nonFunctionalRequirements.length})
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {selectedSpecification.nonFunctionalRequirements.map((req, idx) => (
+                  <div key={idx} style={{
+                    padding: '12px',
+                    border: '1px solid var(--color-separator)',
+                    borderRadius: '8px',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                      <div>
+                        <span className="text-footnote text-secondary" style={{ marginRight: '8px' }}>{req.id}</span>
+                        <span className="text-headline">{req.name}</span>
+                        {req.type && (
+                          <span style={{
+                            marginLeft: '8px',
+                            padding: '2px 6px',
+                            fontSize: '10px',
+                            fontWeight: 600,
+                            borderRadius: '6px',
+                            backgroundColor: 'rgba(255, 149, 0, 0.1)',
+                            color: 'var(--color-systemOrange)',
+                          }}>
+                            {req.type}
+                          </span>
+                        )}
+                      </div>
+                      {req.status && (
+                        <span style={{
+                          padding: '2px 8px',
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          borderRadius: '8px',
+                          backgroundColor: `${getSpecificationStatusColor(req.status)}20`,
+                          color: getSpecificationStatusColor(req.status),
+                        }}>
+                          {req.status}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-body text-secondary" style={{ marginTop: '4px' }}>{req.requirement}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+            <Button variant="secondary" onClick={() => setSelectedSpecification(null)}>Close</Button>
+          </div>
+        </Card>
+      </div>
+    );
+  };
+
+  // Render enabler form modal
+  const renderEnablerForm = () => (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 1000,
+    }}>
+      <Card style={{ maxWidth: '600px', width: '100%', maxHeight: '80vh', overflow: 'auto' }}>
+        <h2 className="text-title1" style={{ marginBottom: '24px' }}>
+          {editingEnabler || editingFileEnabler ? 'Edit Enabler' : 'Create Enabler'}
+        </h2>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label className="text-subheadline">
+              Enabler ID <span style={{ color: 'var(--color-systemGreen)', fontSize: '12px', fontWeight: 'normal' }}>(auto-generated)</span>
+            </label>
+            <input
+              type="text"
+              className="input"
+              readOnly
+              value={enablerFormData.enabler_id}
+              onChange={(e) => setEnablerFormData({ ...enablerFormData, enabler_id: e.target.value })}
+              style={{
+                width: '100%',
+                marginTop: '4px',
+                backgroundColor: 'var(--color-tertiarySystemBackground)',
+                color: 'var(--color-secondaryLabel)',
+                cursor: 'default',
+              }}
+            />
+          </div>
+
+          <div>
+            <label className="text-subheadline" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              Capability
+              {isCapabilitySuggesting && (
+                <span style={{ fontSize: '12px', color: 'var(--color-systemBlue)', fontWeight: 'normal' }}>
+                  (AI analyzing...)
+                </span>
+              )}
+              {capabilityNeedsConfirmation && !isCapabilitySuggesting && (
+                <span style={{ fontSize: '12px', color: 'var(--color-systemGreen)', fontWeight: 'normal' }}>
+                  (AI suggested)
+                </span>
+              )}
+            </label>
+            <select
+              className="input"
+              value={formCapabilityId || ''}
+              onChange={(e) => {
+                setFormCapabilityId(e.target.value || null);
+                // If user manually changes, clear the confirmation requirement
+                if (e.target.value !== suggestedCapabilityId) {
+                  setCapabilityNeedsConfirmation(false);
+                }
+              }}
+              disabled={loadingCapabilities || isCapabilitySuggesting}
+              style={{
+                width: '100%',
+                marginTop: '4px',
+                borderColor: capabilityNeedsConfirmation ? 'var(--color-systemRed)' : undefined,
+                borderWidth: capabilityNeedsConfirmation ? '2px' : undefined,
+                boxShadow: capabilityNeedsConfirmation ? '0 0 0 1px var(--color-systemRed)' : undefined,
+              }}
+            >
+              <option value="">{loadingCapabilities ? 'Loading...' : isCapabilitySuggesting ? 'AI analyzing...' : 'Select Capability'}</option>
+              {capabilities.map((cap) => (
+                <option key={cap.filename} value={cap.capabilityId}>
+                  {cap.capabilityId} - {cap.name}
+                </option>
+              ))}
+            </select>
+            {capabilityNeedsConfirmation && !isCapabilitySuggesting && (
+              <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--color-systemRed)', fontStyle: 'italic' }}>
+                  Please confirm AI suggestion
+                </span>
+                <button
+                  type="button"
+                  onClick={confirmCapabilitySuggestion}
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    backgroundColor: 'var(--color-systemGreen)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Confirm
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="text-subheadline">Name *</label>
+            <input
+              type="text"
+              className="input"
+              value={enablerFormData.name}
+              onChange={(e) => setEnablerFormData({ ...enablerFormData, name: e.target.value })}
+              style={{ width: '100%', marginTop: '4px' }}
+            />
+          </div>
+
+          <div>
+            <label className="text-subheadline">Purpose</label>
+            <textarea
+              className="input"
+              rows={3}
+              value={enablerFormData.purpose}
+              onChange={(e) => setEnablerFormData({ ...enablerFormData, purpose: e.target.value })}
+              style={{ width: '100%', marginTop: '4px' }}
+            />
+          </div>
+
+          <div>
+            <label className="text-subheadline">Owner</label>
+            <input
+              type="text"
+              className="input"
+              value={enablerFormData.owner}
+              onChange={(e) => setEnablerFormData({ ...enablerFormData, owner: e.target.value })}
+              style={{ width: '100%', marginTop: '4px' }}
+            />
+          </div>
+
+          <div>
+            <label className="text-subheadline">Priority</label>
+            <select
+              className="input"
+              value={enablerFormData.priority}
+              onChange={(e) => setEnablerFormData({ ...enablerFormData, priority: e.target.value as any })}
+              style={{ width: '100%', marginTop: '4px' }}
+            >
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+
+          {/* Requirements Section */}
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--color-separator)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <label className="text-subheadline">Requirements ({inlineRequirements.length})</label>
+              <Button variant="secondary" onClick={handleAddInlineRequirement} style={{ padding: '4px 12px', fontSize: '12px' }}>
+                + Add Requirement
+              </Button>
+            </div>
+
+            {inlineRequirements.length === 0 ? (
+              <p className="text-footnote text-secondary" style={{ textAlign: 'center', padding: '16px' }}>
+                No requirements added yet. Click "Add Requirement" to define functional or non-functional requirements.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {inlineRequirements.map((req, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      padding: '12px',
+                      border: '1px solid var(--color-separator)',
+                      borderRadius: '8px',
+                      backgroundColor: 'var(--color-tertiarySystemBackground)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '8px' }}>
+                      <span className="text-footnote text-secondary">{req.id}</span>
+                      <button
+                        onClick={() => handleRemoveInlineRequirement(index)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-systemRed)', fontSize: '12px' }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                      <div>
+                        <label className="text-caption1">Type</label>
+                        <select
+                          className="input"
+                          value={req.type}
+                          onChange={(e) => handleUpdateInlineRequirement(index, 'type', e.target.value)}
+                          style={{ width: '100%', marginTop: '2px', padding: '6px', fontSize: '12px' }}
+                        >
+                          <option value="functional">Functional (FR)</option>
+                          <option value="non_functional">Non-Functional (NFR)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-caption1">Priority</label>
+                        <select
+                          className="input"
+                          value={req.priority}
+                          onChange={(e) => handleUpdateInlineRequirement(index, 'priority', e.target.value)}
+                          style={{ width: '100%', marginTop: '2px', padding: '6px', fontSize: '12px' }}
+                        >
+                          <option value="must_have">Must Have</option>
+                          <option value="should_have">Should Have</option>
+                          <option value="could_have">Could Have</option>
+                          <option value="wont_have">Won't Have</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {req.type === 'non_functional' && (
+                      <div style={{ marginBottom: '8px' }}>
+                        <label className="text-caption1">NFR Category</label>
+                        <select
+                          className="input"
+                          value={req.nfrCategory || ''}
+                          onChange={(e) => handleUpdateInlineRequirement(index, 'nfrCategory', e.target.value)}
+                          style={{ width: '100%', marginTop: '2px', padding: '6px', fontSize: '12px' }}
+                        >
+                          <option value="">Select Category</option>
+                          <option value="Performance">Performance</option>
+                          <option value="Security">Security</option>
+                          <option value="Usability">Usability</option>
+                          <option value="Scalability">Scalability</option>
+                          <option value="Reliability">Reliability</option>
+                          <option value="Maintainability">Maintainability</option>
+                          <option value="Compatibility">Compatibility</option>
+                        </select>
+                      </div>
+                    )}
+
+                    <div style={{ marginBottom: '8px' }}>
+                      <label className="text-caption1">Name *</label>
+                      <input
+                        type="text"
+                        className="input"
+                        value={req.name}
+                        onChange={(e) => handleUpdateInlineRequirement(index, 'name', e.target.value)}
+                        placeholder="Requirement name"
+                        style={{ width: '100%', marginTop: '2px', padding: '6px', fontSize: '12px' }}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-caption1">Description *</label>
+                      <textarea
+                        className="input"
+                        value={req.description}
+                        onChange={(e) => handleUpdateInlineRequirement(index, 'description', e.target.value)}
+                        placeholder="Describe the requirement..."
+                        rows={2}
+                        style={{ width: '100%', marginTop: '2px', padding: '6px', fontSize: '12px' }}
+                      />
+                    </div>
+
+                    <div style={{ marginTop: '8px' }}>
+                      <label className="text-caption1">Status</label>
+                      <select
+                        className="input"
+                        value={req.status}
+                        onChange={(e) => handleUpdateInlineRequirement(index, 'status', e.target.value)}
+                        style={{ width: '100%', marginTop: '2px', padding: '6px', fontSize: '12px' }}
+                      >
+                        <option value="Draft">Draft</option>
+                        <option value="Ready for Design">Ready for Design</option>
+                        <option value="Ready for Implementation">Ready for Implementation</option>
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+          <Button variant="secondary" onClick={() => {
+            setShowEnablerForm(false);
+            setEditingFileEnabler(null);
+            // Reset AI suggestion state
+            setSuggestedCapabilityId(null);
+            setCapabilityNeedsConfirmation(false);
+            setIsCapabilitySuggesting(false);
+          }}>Cancel</Button>
+          <Button variant="primary" onClick={handleSaveEnabler} disabled={!enablerFormData.name || !formCapabilityId}>
+            {editingFileEnabler ? 'Update Enabler' : 'Save Enabler'}
+          </Button>
+        </div>
+      </Card>
+    </div>
+  );
+
+  // Render requirement form modal
+  const renderRequirementForm = () => (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 1000,
+    }}>
+      <Card style={{ maxWidth: '600px', width: '100%', maxHeight: '80vh', overflow: 'auto' }}>
+        <h2 className="text-title1" style={{ marginBottom: '24px' }}>
+          {editingRequirement ? 'Edit Requirement' : 'Create Requirement'}
+        </h2>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label className="text-subheadline">Requirement ID</label>
+            <input
+              type="text"
+              className="input"
+              value={requirementFormData.requirement_id}
+              onChange={(e) => setRequirementFormData({ ...requirementFormData, requirement_id: e.target.value })}
+              style={{ width: '100%', marginTop: '4px' }}
+            />
+          </div>
+
+          <div>
+            <label className="text-subheadline">Type</label>
+            <select
+              className="input"
+              value={requirementFormData.requirement_type}
+              onChange={(e) => {
+                const type = e.target.value as RequirementType;
+                setRequirementFormData({
+                  ...requirementFormData,
+                  requirement_type: type,
+                  requirement_id: type === 'functional' ? generateId('FR') : generateId('NFR'),
+                });
+              }}
+              style={{ width: '100%', marginTop: '4px' }}
+            >
+              <option value="functional">Functional</option>
+              <option value="non_functional">Non-Functional</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-subheadline">Name *</label>
+            <input
+              type="text"
+              className="input"
+              value={requirementFormData.name}
+              onChange={(e) => setRequirementFormData({ ...requirementFormData, name: e.target.value })}
+              style={{ width: '100%', marginTop: '4px' }}
+            />
+          </div>
+
+          <div>
+            <label className="text-subheadline">Description *</label>
+            <textarea
+              className="input"
+              rows={3}
+              value={requirementFormData.description}
+              onChange={(e) => setRequirementFormData({ ...requirementFormData, description: e.target.value })}
+              style={{ width: '100%', marginTop: '4px' }}
+            />
+          </div>
+
+          <div>
+            <label className="text-subheadline">Priority (MoSCoW)</label>
+            <select
+              className="input"
+              value={requirementFormData.priority}
+              onChange={(e) => setRequirementFormData({ ...requirementFormData, priority: e.target.value as RequirementPriority })}
+              style={{ width: '100%', marginTop: '4px' }}
+            >
+              <option value="must_have">Must Have</option>
+              <option value="should_have">Should Have</option>
+              <option value="could_have">Could Have</option>
+              <option value="wont_have">Won't Have</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-subheadline">Notes</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={requirementFormData.notes}
+              onChange={(e) => setRequirementFormData({ ...requirementFormData, notes: e.target.value })}
+              style={{ width: '100%', marginTop: '4px' }}
+            />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+          <Button variant="secondary" onClick={() => setShowRequirementForm(false)}>Cancel</Button>
+          <Button variant="primary" onClick={handleSaveRequirement}>Save</Button>
+        </div>
+      </Card>
+    </div>
+  );
+
+  // Render acceptance criteria form modal
+  const renderCriteriaForm = () => (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 1000,
+    }}>
+      <Card style={{ maxWidth: '700px', width: '100%', maxHeight: '85vh', overflow: 'auto' }}>
+        <h2 className="text-title1" style={{ marginBottom: '24px' }}>
+          {editingCriteria ? 'Edit Acceptance Criteria' : 'Add Acceptance Criteria'}
+        </h2>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label className="text-subheadline">Criteria ID</label>
+            <input
+              type="text"
+              className="input"
+              value={criteriaFormData.criteria_id}
+              onChange={(e) => setCriteriaFormData({ ...criteriaFormData, criteria_id: e.target.value })}
+              style={{ width: '100%', marginTop: '4px' }}
+            />
+          </div>
+
+          <div>
+            <label className="text-subheadline">Format</label>
+            <select
+              className="input"
+              value={criteriaFormData.criteria_format}
+              onChange={(e) => setCriteriaFormData({ ...criteriaFormData, criteria_format: e.target.value as CriteriaFormat })}
+              style={{ width: '100%', marginTop: '4px' }}
+            >
+              <option value="checklist">Checklist</option>
+              <option value="given_when_then">Given/When/Then (BDD)</option>
+              <option value="metric">Metric</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-subheadline">Title *</label>
+            <input
+              type="text"
+              className="input"
+              value={criteriaFormData.title}
+              onChange={(e) => setCriteriaFormData({ ...criteriaFormData, title: e.target.value })}
+              style={{ width: '100%', marginTop: '4px' }}
+            />
+          </div>
+
+          <div>
+            <label className="text-subheadline">Description *</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={criteriaFormData.description}
+              onChange={(e) => setCriteriaFormData({ ...criteriaFormData, description: e.target.value })}
+              style={{ width: '100%', marginTop: '4px' }}
+            />
+          </div>
+
+          {criteriaFormData.criteria_format === 'given_when_then' && (
+            <>
+              <div>
+                <label className="text-subheadline">Given (Preconditions)</label>
+                <textarea
+                  className="input"
+                  rows={2}
+                  placeholder="Given the user is logged in and has admin privileges..."
+                  value={criteriaFormData.given_clause}
+                  onChange={(e) => setCriteriaFormData({ ...criteriaFormData, given_clause: e.target.value })}
+                  style={{ width: '100%', marginTop: '4px' }}
+                />
+              </div>
+              <div>
+                <label className="text-subheadline">When (Action)</label>
+                <textarea
+                  className="input"
+                  rows={2}
+                  placeholder="When the user clicks the submit button..."
+                  value={criteriaFormData.when_clause}
+                  onChange={(e) => setCriteriaFormData({ ...criteriaFormData, when_clause: e.target.value })}
+                  style={{ width: '100%', marginTop: '4px' }}
+                />
+              </div>
+              <div>
+                <label className="text-subheadline">Then (Expected Result)</label>
+                <textarea
+                  className="input"
+                  rows={2}
+                  placeholder="Then the form should be submitted and a success message displayed..."
+                  value={criteriaFormData.then_clause}
+                  onChange={(e) => setCriteriaFormData({ ...criteriaFormData, then_clause: e.target.value })}
+                  style={{ width: '100%', marginTop: '4px' }}
+                />
+              </div>
+            </>
+          )}
+
+          {criteriaFormData.criteria_format === 'metric' && (
+            <>
+              <div>
+                <label className="text-subheadline">Metric Name</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., Response Time, Uptime, Error Rate"
+                  value={criteriaFormData.metric_name}
+                  onChange={(e) => setCriteriaFormData({ ...criteriaFormData, metric_name: e.target.value })}
+                  style={{ width: '100%', marginTop: '4px' }}
+                />
+              </div>
+              <div>
+                <label className="text-subheadline">Target Value</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., < 200ms, > 99.9%, < 0.1%"
+                  value={criteriaFormData.metric_target}
+                  onChange={(e) => setCriteriaFormData({ ...criteriaFormData, metric_target: e.target.value })}
+                  style={{ width: '100%', marginTop: '4px' }}
+                />
+              </div>
+            </>
+          )}
+
+          <div>
+            <label className="text-subheadline">Priority</label>
+            <select
+              className="input"
+              value={criteriaFormData.priority}
+              onChange={(e) => setCriteriaFormData({ ...criteriaFormData, priority: e.target.value as CriteriaPriority })}
+              style={{ width: '100%', marginTop: '4px' }}
+            >
+              <option value="must">Must</option>
+              <option value="should">Should</option>
+              <option value="could">Could</option>
+              <option value="wont">Won't</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+          <Button variant="secondary" onClick={() => setShowCriteriaForm(false)}>Cancel</Button>
+          <Button variant="primary" onClick={handleSaveCriteria}>Save</Button>
+        </div>
+      </Card>
+    </div>
+  );
+
+  // Render edit specification modal
+  const renderEditSpecificationModal = () => {
+    if (!editingSpecification) return null;
+    return (
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 1000,
+      }}>
+        <Card style={{ maxWidth: '700px', width: '100%', maxHeight: '85vh', overflow: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '24px' }}>
+            <h2 className="text-title1">Edit Specification</h2>
+            <button
+              onClick={() => setEditingSpecification(null)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '24px', color: 'var(--color-secondaryLabel)' }}
+            >
+              x
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div>
+              <label className="text-subheadline">ID</label>
+              <input
+                type="text"
+                className="input"
+                value={editingSpecification.id}
+                disabled
+                style={{ width: '100%', marginTop: '4px', backgroundColor: 'var(--color-tertiarySystemBackground)' }}
+              />
+            </div>
+
+            <div>
+              <label className="text-subheadline">Name *</label>
+              <input
+                type="text"
+                className="input"
+                value={editingSpecification.name}
+                onChange={(e) => setEditingSpecification({ ...editingSpecification, name: e.target.value })}
+                style={{ width: '100%', marginTop: '4px' }}
+              />
+            </div>
+
+            <div>
+              <label className="text-subheadline">Capability ID</label>
+              <input
+                type="text"
+                className="input"
+                value={editingSpecification.capabilityId}
+                onChange={(e) => setEditingSpecification({ ...editingSpecification, capabilityId: e.target.value })}
+                style={{ width: '100%', marginTop: '4px' }}
+              />
+            </div>
+
+            <div>
+              <label className="text-subheadline">Purpose</label>
+              <textarea
+                className="input"
+                rows={3}
+                value={editingSpecification.purpose}
+                onChange={(e) => setEditingSpecification({ ...editingSpecification, purpose: e.target.value })}
+                style={{ width: '100%', marginTop: '4px' }}
+              />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div>
+                <label className="text-subheadline">Status</label>
+                <select
+                  className="input"
+                  value={editingSpecification.status}
+                  onChange={(e) => setEditingSpecification({ ...editingSpecification, status: e.target.value })}
+                  style={{ width: '100%', marginTop: '4px' }}
+                >
+                  <option value="In Draft">In Draft</option>
+                  <option value="Ready for Analysis">Ready for Analysis</option>
+                  <option value="In Analysis">In Analysis</option>
+                  <option value="Ready for Design">Ready for Design</option>
+                  <option value="In Design">In Design</option>
+                  <option value="Ready for Implementation">Ready for Implementation</option>
+                  <option value="In Implementation">In Implementation</option>
+                  <option value="Implemented">Implemented</option>
+                  <option value="Ready for Refactor">Ready for Refactor</option>
+                  <option value="Ready for Retirement">Ready for Retirement</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-subheadline">Approval</label>
+                <select
+                  className="input"
+                  value={editingSpecification.approval}
+                  onChange={(e) => setEditingSpecification({ ...editingSpecification, approval: e.target.value })}
+                  style={{ width: '100%', marginTop: '4px' }}
+                >
+                  <option value="Pending">Pending</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Rejected">Rejected</option>
+                  <option value="Not Approved">Not Approved</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div>
+                <label className="text-subheadline">Priority</label>
+                <select
+                  className="input"
+                  value={editingSpecification.priority}
+                  onChange={(e) => setEditingSpecification({ ...editingSpecification, priority: e.target.value })}
+                  style={{ width: '100%', marginTop: '4px' }}
+                >
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-subheadline">Owner</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={editingSpecification.owner}
+                  onChange={(e) => setEditingSpecification({ ...editingSpecification, owner: e.target.value })}
+                  style={{ width: '100%', marginTop: '4px' }}
+                />
+              </div>
+            </div>
+
+            {/* Requirements Summary */}
+            <div style={{
+              padding: '12px',
+              backgroundColor: 'var(--color-tertiarySystemBackground)',
+              borderRadius: '8px',
+            }}>
+              <p className="text-subheadline" style={{ marginBottom: '8px' }}>Requirements</p>
+              <div style={{ display: 'flex', gap: '16px' }}>
+                <span className="text-footnote">
+                  <strong>Functional:</strong> {editingSpecification.functionalRequirements.length}
+                </span>
+                <span className="text-footnote">
+                  <strong>Non-Functional:</strong> {editingSpecification.nonFunctionalRequirements.length}
+                </span>
+              </div>
+              <p className="text-caption2 text-tertiary" style={{ marginTop: '8px' }}>
+                Note: To edit individual requirements, please modify the specification file directly.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+            <Button variant="secondary" onClick={() => setEditingSpecification(null)}>Cancel</Button>
+            <Button variant="primary" onClick={handleSaveSpecification}>Save Changes</Button>
+          </div>
+        </Card>
+      </div>
+    );
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto" style={{ padding: '16px' }}>
+      <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+        <div>
+          <h1 className="text-large-title" style={{ marginBottom: '8px' }}>Enabler Management</h1>
+          <p className="text-body text-secondary">
+            Manage enablers, requirements, and acceptance criteria for your capabilities.
+          </p>
+        </div>
+        <Button
+          variant="secondary"
+          onClick={handleAnalyzeSpecifications}
+          disabled={isAnalyzing}
+        >
+          {isAnalyzing ? 'Analyzing...' : 'Analyze Specifications'}
+        </Button>
+      </div>
+
+      {error && (
+        <Alert type="error" style={{ marginBottom: '16px' }}>
+          <strong>Error:</strong> {error}
+          <button onClick={clearError} style={{ marginLeft: '12px', color: 'var(--color-systemBlue)' }}>
+            Dismiss
+          </button>
+        </Alert>
+      )}
+
+      {analyzeError && (
+        <Alert type="error" style={{ marginBottom: '16px' }}>
+          <strong>Analyze Error:</strong> {analyzeError}
+          <button onClick={clearAnalyzeError} style={{ marginLeft: '12px', color: 'var(--color-systemBlue)' }}>
+            Dismiss
+          </button>
+        </Alert>
+      )}
+
+      <Alert type="info" style={{ marginBottom: '24px' }}>
+        <strong>Enablers:</strong> Technical implementations that realize capabilities through specific functionality.
+        Each enabler contains functional and non-functional requirements with testable acceptance criteria.
+      </Alert>
+
+      {/* Specification Files from ./specifications folder */}
+      {specifications.length > 0 && (
+        <Card style={{ marginBottom: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <div>
+              <h3 className="text-title2" style={{ marginBottom: '4px' }}>
+                Specification Files ({specifications.length})
+              </h3>
+              <p className="text-footnote text-secondary">
+                Enabler specifications from ./specifications folder (ENB-*.md files)
+              </p>
+            </div>
+          </div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+            gap: '12px',
+          }}>
+            {specifications.map((spec, index) => (
+              <div
+                key={spec.id}
+                draggable
+                onDragStart={() => handleDragStart(index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDrop={(e) => handleDrop(e, index)}
+                onDragEnd={handleDragEnd}
+                style={{
+                  cursor: 'grab',
+                  padding: '16px',
+                  border: draggedSpecIndex === index
+                    ? '2px dashed var(--color-systemBlue)'
+                    : '1px solid var(--color-separator)',
+                  borderRadius: '12px',
+                  backgroundColor: draggedSpecIndex === index
+                    ? 'var(--color-tertiarySystemBackground)'
+                    : 'var(--color-secondarySystemBackground)',
+                  transition: 'box-shadow 0.2s, transform 0.2s, border 0.2s',
+                  opacity: draggedSpecIndex === index ? 0.6 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (draggedSpecIndex === null) {
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.boxShadow = 'none';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '8px' }}>
+                  <div
+                    style={{ flex: 1, cursor: 'pointer' }}
+                    onClick={() => setSelectedSpecification(spec)}
+                  >
+                    <h4 className="text-headline" style={{ marginBottom: '4px' }}>{spec.name}</h4>
+                    <p className="text-caption2 text-tertiary">{spec.id}</p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px', marginLeft: '8px' }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleEditSpecification(spec); }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: 'var(--color-systemBlue)',
+                        fontSize: '11px',
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--color-tertiarySystemBackground)'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteSpecification(spec); }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: 'var(--color-systemRed)',
+                        fontSize: '11px',
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 59, 48, 0.1)'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setSelectedSpecification(spec)}
+                >
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                    <span style={{
+                      padding: '2px 8px',
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      borderRadius: '10px',
+                      backgroundColor: `${getSpecificationStatusColor(spec.status)}20`,
+                      color: getSpecificationStatusColor(spec.status),
+                    }}>
+                      {spec.status}
+                    </span>
+                    <span style={{
+                      padding: '2px 8px',
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      borderRadius: '10px',
+                      backgroundColor: `${getSpecificationApprovalColor(spec.approval)}20`,
+                      color: getSpecificationApprovalColor(spec.approval),
+                    }}>
+                      {spec.approval}
+                    </span>
+                    <span style={{
+                      padding: '2px 8px',
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      borderRadius: '10px',
+                      backgroundColor: 'var(--color-tertiarySystemBackground)',
+                      color: 'var(--color-tertiaryLabel)',
+                    }}>
+                      {spec.priority}
+                    </span>
+                  </div>
+
+                  {spec.purpose && (
+                    <p className="text-caption1 text-secondary" style={{
+                      marginBottom: '8px',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                    }}>
+                      {spec.purpose}
+                    </p>
+                  )}
+
+                  <div style={{
+                    display: 'flex',
+                    gap: '12px',
+                    paddingTop: '8px',
+                    borderTop: '1px solid var(--color-separator)',
+                    fontSize: '11px',
+                  }}>
+                    <span className="text-tertiary">
+                      <strong>Cap:</strong> {spec.capabilityId || 'N/A'}
+                    </span>
+                    <span className="text-tertiary">
+                      <strong>FR:</strong> {spec.functionalRequirements.length}
+                    </span>
+                    <span className="text-tertiary">
+                      <strong>NFR:</strong> {spec.nonFunctionalRequirements.length}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Capability Selection */}
+      <Card style={{ marginBottom: '24px' }}>
+        <h3 className="text-title2" style={{ marginBottom: '16px' }}>Select Capability</h3>
+        {!currentWorkspace?.projectFolder ? (
+          <p className="text-body text-secondary">
+            Please set a project folder for this workspace to load capabilities.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <select
+              className="input"
+              value={selectedCapabilityId || ''}
+              onChange={(e) => {
+                clearSelection();
+                setSelectedCapabilityId(e.target.value || null);
+              }}
+              disabled={loadingCapabilities}
+              style={{ flex: 1, padding: '10px 16px' }}
+            >
+              <option value="">
+                {loadingCapabilities ? 'Loading capabilities...' : '-- Select a Capability --'}
+              </option>
+              {capabilities.map((cap) => (
+                <option key={cap.filename} value={cap.capabilityId}>
+                  {cap.capabilityId} - {cap.name}
+                </option>
+              ))}
+            </select>
+            {selectedCapabilityId && (
+              <Button variant="primary" onClick={handleCreateEnabler}>
+                + Add Enabler
+              </Button>
+            )}
+          </div>
+        )}
+        {!loadingCapabilities && capabilities.length === 0 && currentWorkspace?.projectFolder && (
+          <p className="text-footnote text-secondary" style={{ marginTop: '8px' }}>
+            No capabilities found. Create CAP-*.md files in the definition folder.
+          </p>
+        )}
+      </Card>
+
+      {/* Enablers List - Always show, filter by capability if selected */}
+      <div style={{ display: 'grid', gridTemplateColumns: selectedEnabler ? '350px 1fr' : '1fr', gap: '24px' }}>
+        {/* File-based Enablers Column */}
+        <div>
+          {(() => {
+            // Helper function to extract CAP-XXXXXX pattern from capability ID
+            const normalizeCapabilityId = (capId: string | undefined): string => {
+              if (!capId) return '';
+              // Look for CAP-XXXXXX pattern anywhere in the string
+              const match = capId.match(/CAP-\d+/i);
+              return match ? match[0].toUpperCase() : capId.trim().toUpperCase();
+            };
+
+            // Filter file enablers by selected capability, or show all if none selected
+            // Use normalized comparison to handle different capability ID formats
+            const normalizedSelectedCapId = normalizeCapabilityId(selectedCapabilityId || undefined);
+            const filteredEnablers = selectedCapabilityId
+              ? fileEnablers.filter(e => normalizeCapabilityId(e.capabilityId) === normalizedSelectedCapId)
+              : fileEnablers;
+            return (
+              <>
+                <h3 className="text-title2" style={{ marginBottom: '16px' }}>
+                  {selectedCapabilityId ? (
+                    <>
+                      Enablers ({filteredEnablers.length})
+                      <span className="text-footnote text-secondary" style={{ fontWeight: 'normal', marginLeft: '8px' }}>
+                        for {capabilities.find(c => c.capabilityId === selectedCapabilityId)?.name || selectedCapabilityId}
+                      </span>
+                    </>
+                  ) : (
+                    <>All Enablers ({fileEnablers.length})</>
+                  )}
+                </h3>
+                {loadingFileEnablers ? (
+                  <p className="text-body text-secondary">Loading enablers...</p>
+                ) : filteredEnablers.length === 0 ? (
+                  <Card>
+                    <p className="text-body text-secondary" style={{ textAlign: 'center', padding: '20px' }}>
+                      {selectedCapabilityId
+                        ? 'No enablers found for this capability. Create your first enabler to get started.'
+                        : 'No enablers found. Select a capability and create your first enabler to get started.'}
+                    </p>
+                  </Card>
+                ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                      {filteredEnablers.map((enabler) => (
+                        <Card key={enabler.enablerId}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                            <div style={{ flex: 1 }}>
+                              <h4 className="text-headline" style={{ marginBottom: '8px' }}>{enabler.name}</h4>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                                <span style={{
+                                  padding: '2px 8px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  borderRadius: '12px',
+                                  backgroundColor: 'var(--color-systemGreen)20',
+                                  color: 'var(--color-systemGreen)',
+                                }}>
+                                  {enabler.status || 'Planned'}
+                                </span>
+                                <span style={{
+                                  padding: '2px 8px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  borderRadius: '12px',
+                                  backgroundColor: 'var(--color-tertiarySystemBackground)',
+                                  color: 'var(--color-secondaryLabel)',
+                                }}>
+                                  {(enabler.priority || 'medium').toUpperCase()}
+                                </span>
+                              </div>
+                              <p className="text-footnote text-secondary">{enabler.enablerId}</p>
+                              {enabler.purpose && (
+                                <p className="text-footnote text-secondary" style={{ marginTop: '4px' }}>
+                                  {enabler.purpose.length > 100 ? enabler.purpose.substring(0, 100) + '...' : enabler.purpose}
+                                </p>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button
+                                onClick={() => handleEditFileEnabler(enabler)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  color: 'var(--color-systemBlue)',
+                                  fontSize: '12px',
+                                  padding: '4px 8px',
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteFileEnabler(enabler)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  color: 'var(--color-systemRed)',
+                                  fontSize: '12px',
+                                  padding: '4px 8px',
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+
+          {/* Enabler Details Column */}
+          {selectedEnabler && (
+            <div>
+              <Card style={{ marginBottom: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '16px' }}>
+                  <div>
+                    <h3 className="text-title2">{selectedEnabler.name}</h3>
+                    <p className="text-footnote text-secondary">{selectedEnabler.enabler_id}</p>
+                  </div>
+                  <button
+                    onClick={clearSelection}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px', color: 'var(--color-secondaryLabel)' }}
+                  >
+                    x
+                  </button>
+                </div>
+
+                {selectedEnabler.purpose && (
+                  <div style={{ marginBottom: '16px' }}>
+                    <p className="text-subheadline" style={{ marginBottom: '4px' }}>Purpose</p>
+                    <p className="text-body">{selectedEnabler.purpose}</p>
+                  </div>
+                )}
+
+                {/* Criteria Summary */}
+                {criteriaSummary && criteriaSummary.total_count > 0 && (
+                  <div style={{
+                    padding: '16px',
+                    backgroundColor: 'var(--color-tertiarySystemBackground)',
+                    borderRadius: '8px',
+                    marginBottom: '16px'
+                  }}>
+                    <p className="text-subheadline" style={{ marginBottom: '8px' }}>Acceptance Criteria Progress</p>
+                    <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                      <div style={{
+                        width: '100px',
+                        height: '100px',
+                        borderRadius: '50%',
+                        background: `conic-gradient(var(--color-systemGreen) ${criteriaSummary.percentage}%, var(--color-systemGray3) 0)`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}>
+                        <div style={{
+                          width: '80px',
+                          height: '80px',
+                          borderRadius: '50%',
+                          backgroundColor: 'var(--color-systemBackground)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '18px',
+                          fontWeight: 'bold',
+                        }}>
+                          {Math.round(criteriaSummary.percentage)}%
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <span className="text-footnote">Passed: {criteriaSummary.passed_count}</span>
+                        <span className="text-footnote">Failed: {criteriaSummary.failed_count}</span>
+                        <span className="text-footnote">Pending: {criteriaSummary.pending_count}</span>
+                        <span className="text-footnote">Blocked: {criteriaSummary.blocked_count}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </Card>
+
+              {/* Requirements Section */}
+              <Card style={{ marginBottom: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h4 className="text-title3">Requirements ({requirements.length})</h4>
+                  <Button variant="primary" onClick={handleCreateRequirement}>+ Add Requirement</Button>
+                </div>
+
+                {requirements.length === 0 ? (
+                  <p className="text-body text-secondary" style={{ textAlign: 'center', padding: '20px' }}>
+                    No requirements defined yet.
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {requirements.map((req) => (
+                      <div
+                        key={req.id}
+                        style={{
+                          padding: '12px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--color-separator)',
+                          backgroundColor: req.completed ? 'rgba(52, 199, 89, 0.05)' : undefined,
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                              <input
+                                type="checkbox"
+                                checked={req.completed}
+                                onChange={() => handleVerifyRequirement(req)}
+                                style={{ width: '18px', height: '18px' }}
+                              />
+                              <h5 className="text-headline" style={{
+                                textDecoration: req.completed ? 'line-through' : 'none',
+                                color: req.completed ? 'var(--color-secondaryLabel)' : undefined,
+                              }}>
+                                {req.name}
+                              </h5>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                              <span style={{
+                                padding: '2px 8px',
+                                fontSize: '10px',
+                                fontWeight: 600,
+                                borderRadius: '8px',
+                                backgroundColor: req.requirement_type === 'functional' ? 'rgba(0, 122, 255, 0.1)' : 'rgba(255, 149, 0, 0.1)',
+                                color: req.requirement_type === 'functional' ? 'var(--color-systemBlue)' : 'var(--color-systemOrange)',
+                              }}>
+                                {getRequirementTypeDisplayName(req.requirement_type)}
+                              </span>
+                              <span style={{
+                                padding: '2px 8px',
+                                fontSize: '10px',
+                                fontWeight: 600,
+                                borderRadius: '8px',
+                                backgroundColor: `${getRequirementPriorityColor(req.priority)}15`,
+                                color: getRequirementPriorityColor(req.priority),
+                              }}>
+                                {getRequirementPriorityDisplayName(req.priority)}
+                              </span>
+                            </div>
+                            <p className="text-footnote text-secondary">{req.description}</p>
+                            <p className="text-caption2 text-tertiary" style={{ marginTop: '4px' }}>{req.requirement_id}</p>
+                          </div>
+                          <button
+                            onClick={() => deleteRequirement(req.id)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-systemRed)', fontSize: '12px' }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              {/* Acceptance Criteria Section */}
+              <Card>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h4 className="text-title3">Acceptance Criteria ({acceptanceCriteria.length})</h4>
+                  <Button variant="primary" onClick={handleCreateCriteria}>+ Add Criteria</Button>
+                </div>
+
+                {acceptanceCriteria.length === 0 ? (
+                  <p className="text-body text-secondary" style={{ textAlign: 'center', padding: '20px' }}>
+                    No acceptance criteria defined yet.
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {acceptanceCriteria.map((criteria) => (
+                      <div
+                        key={criteria.id}
+                        style={{
+                          padding: '12px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--color-separator)',
+                          backgroundColor: criteria.status === 'passed' ? 'rgba(52, 199, 89, 0.05)' :
+                                          criteria.status === 'failed' ? 'rgba(255, 59, 48, 0.05)' : undefined,
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                              <h5 className="text-headline">{criteria.title}</h5>
+                              <span style={{
+                                padding: '2px 8px',
+                                fontSize: '10px',
+                                fontWeight: 600,
+                                borderRadius: '8px',
+                                backgroundColor: `${getCriteriaStatusColor(criteria.status)}20`,
+                                color: getCriteriaStatusColor(criteria.status),
+                              }}>
+                                {getCriteriaStatusDisplayName(criteria.status)}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                              <span style={{
+                                padding: '2px 8px',
+                                fontSize: '10px',
+                                fontWeight: 600,
+                                borderRadius: '8px',
+                                backgroundColor: 'var(--color-tertiarySystemBackground)',
+                                color: 'var(--color-secondaryLabel)',
+                              }}>
+                                {getCriteriaFormatDisplayName(criteria.criteria_format)}
+                              </span>
+                              <span style={{
+                                padding: '2px 8px',
+                                fontSize: '10px',
+                                fontWeight: 600,
+                                borderRadius: '8px',
+                                backgroundColor: 'var(--color-tertiarySystemBackground)',
+                                color: 'var(--color-secondaryLabel)',
+                              }}>
+                                {getCriteriaPriorityDisplayName(criteria.priority)}
+                              </span>
+                            </div>
+                            <p className="text-footnote text-secondary">{criteria.description}</p>
+
+                            {/* Show format-specific fields */}
+                            {criteria.criteria_format === 'given_when_then' && (
+                              <div style={{ marginTop: '8px', fontSize: '12px' }}>
+                                {criteria.given_clause && <p><strong>Given:</strong> {criteria.given_clause}</p>}
+                                {criteria.when_clause && <p><strong>When:</strong> {criteria.when_clause}</p>}
+                                {criteria.then_clause && <p><strong>Then:</strong> {criteria.then_clause}</p>}
+                              </div>
+                            )}
+
+                            {criteria.criteria_format === 'metric' && (
+                              <div style={{ marginTop: '8px', fontSize: '12px' }}>
+                                {criteria.metric_name && <p><strong>Metric:</strong> {criteria.metric_name}</p>}
+                                {criteria.metric_target && <p><strong>Target:</strong> {criteria.metric_target}</p>}
+                                {criteria.metric_actual && <p><strong>Actual:</strong> {criteria.metric_actual}</p>}
+                              </div>
+                            )}
+
+                            <p className="text-caption2 text-tertiary" style={{ marginTop: '4px' }}>{criteria.criteria_id}</p>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {criteria.status === 'pending' && (
+                              <>
+                                <button
+                                  onClick={() => handleVerifyCriteria(criteria, 'passed')}
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-systemGreen)', fontSize: '11px' }}
+                                >
+                                  Pass
+                                </button>
+                                <button
+                                  onClick={() => handleVerifyCriteria(criteria, 'failed')}
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-systemRed)', fontSize: '11px' }}
+                                >
+                                  Fail
+                                </button>
+                              </>
+                            )}
+                            {criteria.status !== 'pending' && (
+                              <button
+                                onClick={() => updateCriteria(criteria.id, { status: 'pending' })}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-systemOrange)', fontSize: '11px' }}
+                              >
+                                Reset
+                              </button>
+                            )}
+                            <button
+                              onClick={() => deleteCriteria(criteria.id)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-systemRed)', fontSize: '11px' }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </div>
+          )}
+        </div>
+
+      {/* Modals */}
+      {showEnablerForm && renderEnablerForm()}
+      {showRequirementForm && renderRequirementForm()}
+      {showCriteriaForm && renderCriteriaForm()}
+      {selectedSpecification && renderSpecificationDetail()}
+      {editingSpecification && renderEditSpecificationModal()}
+
+      {/* Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        confirmVariant={confirmDialog.confirmVariant}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={closeConfirmDialog}
+      />
+    </div>
+  );
+};
