@@ -143,15 +143,15 @@ if [ "$CLEAN_FLAG" = true ]; then
 
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
         echo -e "${YELLOW}Removing containers and volumes...${NC}"
-        docker-compose down -v
+        docker compose down -v
         echo -e "  ${GREEN}✓${NC} Containers and volumes removed"
     else
         echo -e "${YELLOW}Cancelled. Stopping containers only...${NC}"
-        docker-compose down
+        docker compose down
         echo -e "  ${GREEN}✓${NC} Docker containers stopped"
     fi
 else
-    docker-compose down
+    docker compose down
     if [ $? -eq 0 ]; then
         echo -e "  ${GREEN}✓${NC} Docker containers stopped"
     else

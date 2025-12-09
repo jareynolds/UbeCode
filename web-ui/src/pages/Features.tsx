@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Alert, Button, AIPresetIndicator } from '../components';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { INTEGRATION_URL } from '../api/client';
 
 interface FileFeature {
   filename: string;
@@ -50,7 +51,7 @@ export const Features: React.FC = () => {
 
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:9080/feature-files', {
+      const response = await fetch(`${INTEGRATION_URL}/feature-files`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -112,7 +113,7 @@ export const Features: React.FC = () => {
         path = `${currentWorkspace.projectFolder}/specifications/${fileName}`;
       }
 
-      const response = await fetch('http://localhost:9080/save-feature', {
+      const response = await fetch(`${INTEGRATION_URL}/save-feature`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -151,7 +152,7 @@ export const Features: React.FC = () => {
 
     setDeletingFeature(true);
     try {
-      const response = await fetch('http://localhost:9080/delete-feature', {
+      const response = await fetch(`${INTEGRATION_URL}/delete-feature`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

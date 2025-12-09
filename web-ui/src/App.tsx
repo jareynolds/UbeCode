@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Header, Sidebar, ProtectedRoute, ProtectedPage, UIFrameworkProvider, UIFrameworkIndicator } from './components';
 import { Login, GoogleCallback, Dashboard, WorkspaceOverview, Capabilities, Features, Vision, Designs, Integrations, AIChat, Code, Run, Workspaces, Storyboard, Ideation, Analyze, Settings, Admin, System, AIPrinciples, UIFramework, UIStyles, UIDesigner, DataCollection, Enablers, ConceptionApproval, DefinitionApproval, DesignApproval, ImplementationApproval, Testing, TestingApproval } from './pages';
-import { ApprovalQueue } from './pages/ApprovalQueue';
 import { defaultUIFrameworks, applyUIStyleToDOM } from './pages/UIStyles';
 import { AppProvider } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -16,7 +15,6 @@ import './styles/main.css';
 
 const adminSidebarItems = [
   { path: '/admin', label: 'Admin Panel', icon: '◈' },
-  { path: '/approvals', label: 'Approval Queue', icon: '✓', showApprovalBadge: true },
 ];
 
 // Helper to check if a phase has any rejections
@@ -273,7 +271,6 @@ function AppContent() {
             <Route path="/settings" element={<ProtectedPage path="/settings"><Settings /></ProtectedPage>} />
             <Route path="/admin" element={<ProtectedPage path="/admin"><Admin /></ProtectedPage>} />
             <Route path="/data-collection" element={<ProtectedPage path="/data-collection"><DataCollection /></ProtectedPage>} />
-            <Route path="/approvals" element={<ProtectedPage path="/approvals"><ApprovalQueue /></ProtectedPage>} />
           </Routes>
         </main>
       </div>

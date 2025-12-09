@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Alert, Button } from '../components';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { INTEGRATION_URL } from '../api/client';
 
 interface ConceptionItem {
   id: string;
@@ -85,7 +86,7 @@ export const ConceptionApproval: React.FC = () => {
     try {
       // Load vision items (using theme-files endpoint which handles VIS-*, VISION-*, THEME-* files)
       console.log('Fetching theme-files with workspacePath:', currentWorkspace.projectFolder);
-      const visionResponse = await fetch('http://localhost:9080/theme-files', {
+      const visionResponse = await fetch(`${INTEGRATION_URL}/theme-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: currentWorkspace.projectFolder }),
@@ -103,7 +104,7 @@ export const ConceptionApproval: React.FC = () => {
       }));
 
       // Load ideation items (using ideation-files endpoint which handles IDEA-* files)
-      const ideationResponse = await fetch('http://localhost:9080/ideation-files', {
+      const ideationResponse = await fetch(`${INTEGRATION_URL}/ideation-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: currentWorkspace.projectFolder }),
@@ -121,7 +122,7 @@ export const ConceptionApproval: React.FC = () => {
       }));
 
       // Load storyboard items (using story-files endpoint which handles story*, STORY*, SB-* files)
-      const storyboardResponse = await fetch('http://localhost:9080/story-files', {
+      const storyboardResponse = await fetch(`${INTEGRATION_URL}/story-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: currentWorkspace.projectFolder }),

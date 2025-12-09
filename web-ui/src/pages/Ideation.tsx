@@ -5,6 +5,7 @@ import { useCollaboration } from '../context/CollaborationContext';
 import RemoteCursors from '../components/RemoteCursors';
 import { AssetsPane, WorkspaceHeader, AIPresetIndicator } from '../components';
 import { Button } from '../components/Button';
+import { SPEC_URL } from '../api/client';
 
 interface CardImage {
   id: string;
@@ -809,7 +810,7 @@ export const Ideation: React.FC = () => {
       }
 
       // Send to backend to save files in workspace conception folder
-      const response = await fetch('http://localhost:4001/api/save-specifications', {
+      const response = await fetch(`${SPEC_URL}/save-specifications`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -847,7 +848,7 @@ export const Ideation: React.FC = () => {
   const handleAnalyzeIdeation = async (silent: boolean = false) => {
     try {
       // Read IDEA-*.md files from conception folder
-      const response = await fetch('http://localhost:4001/api/read-specifications', {
+      const response = await fetch(`${SPEC_URL}/read-specifications`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

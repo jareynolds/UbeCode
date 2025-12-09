@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Button } from './Button';
 import { Alert } from './Alert';
+import { INTEGRATION_URL } from '../api/client';
 
 interface Workspace {
   id: string;
@@ -76,7 +77,7 @@ export const WorkspaceIntegrations: React.FC<WorkspaceIntegrationsProps> = ({ wo
       }
 
       // Fetch resources from integration
-      const response = await axios.post('http://localhost:9080/fetch-resources', {
+      const response = await axios.post(`${INTEGRATION_URL}/fetch-resources`, {
         integration_name: integrationName,
         credentials: config.fields
       });
@@ -101,7 +102,7 @@ export const WorkspaceIntegrations: React.FC<WorkspaceIntegrationsProps> = ({ wo
         return;
       }
 
-      const response = await axios.post('http://localhost:9080/suggest-resources', {
+      const response = await axios.post(`${INTEGRATION_URL}/suggest-resources`, {
         workspace_name: workspace.name,
         workspace_description: workspace.description || '',
         integration_name: integrationName,
@@ -171,7 +172,7 @@ export const WorkspaceIntegrations: React.FC<WorkspaceIntegrationsProps> = ({ wo
             for (const resource of dataToSave) {
               if (resource.type === 'user' || resource.type === 'team') {
                 console.log(`[WorkspaceIntegrations] Fetching files for ${resource.name}...`);
-                const response = await axios.post('http://localhost:9080/fetch-team-files', {
+                const response = await axios.post(`${INTEGRATION_URL}/fetch-team-files`, {
                   integration_name: 'Figma API',
                   team_id: resource.id,
                   credentials: { access_token: config.fields.access_token }

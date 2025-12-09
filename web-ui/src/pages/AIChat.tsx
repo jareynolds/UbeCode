@@ -4,6 +4,7 @@ import { Card } from '../components/Card';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { AIPresetIndicator } from '../components/AIPresetIndicator';
 import { UIFrameworkIndicator } from '../components/UIFrameworkIndicator';
+import { INTEGRATION_URL } from '../api/client';
 
 interface Message {
   id: string;
@@ -76,7 +77,7 @@ export const AIChat: React.FC = () => {
         content: msg.content,
       }));
 
-      const response = await fetch('http://localhost:9080/ai-chat', {
+      const response = await fetch(`${INTEGRATION_URL}/ai-chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

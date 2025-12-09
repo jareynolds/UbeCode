@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from './Button';
+import { INTEGRATION_URL } from '../api/client';
 
 interface FolderItem {
   name: string;
@@ -28,7 +29,7 @@ export const FolderBrowser: React.FC<FolderBrowserProps> = ({ onSelect, onClose 
   const loadFolder = async (path: string) => {
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:9080/folders/list?path=${encodeURIComponent(path)}`);
+      const response = await fetch(`${INTEGRATION_URL}/folders/list?path=${encodeURIComponent(path)}`);
       if (!response.ok) {
         throw new Error('Failed to load folder');
       }
@@ -63,7 +64,7 @@ export const FolderBrowser: React.FC<FolderBrowserProps> = ({ onSelect, onClose 
     }
 
     try {
-      const response = await fetch('http://localhost:9080/folders/create', {
+      const response = await fetch(`${INTEGRATION_URL}/folders/create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

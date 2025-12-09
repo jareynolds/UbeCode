@@ -5,6 +5,7 @@ import { Card } from '../components/Card';
 import { AIPresetIndicator } from '../components/AIPresetIndicator';
 import { WorkspaceIntegrations } from '../components/WorkspaceIntegrations';
 import { FolderBrowser } from '../components/FolderBrowser';
+import { INTEGRATION_URL } from '../api/client';
 
 // Types for scanned workspaces
 interface WorkspaceConfig {
@@ -73,7 +74,7 @@ export const Workspaces: React.FC = () => {
   const scanWorkspaceFolders = async () => {
     setIsScanning(true);
     try {
-      const response = await fetch('http://localhost:9080/workspace-config/scan');
+      const response = await fetch(`${INTEGRATION_URL}/workspace-config/scan`);
       if (response.ok) {
         const data = await response.json();
         // Filter out workspaces that are already in the user's workspace list
@@ -205,7 +206,7 @@ export const Workspaces: React.FC = () => {
     if (selectingFolderFor) {
       try {
         // Ensure workspace folder structure exists (creates required subfolders)
-        const response = await fetch('http://localhost:9080/folders/ensure-workspace-structure', {
+        const response = await fetch(`${INTEGRATION_URL}/folders/ensure-workspace-structure`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path }),

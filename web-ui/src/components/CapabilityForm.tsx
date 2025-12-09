@@ -8,6 +8,7 @@ import type {
 import { capabilityService } from '../api/services';
 import { Button } from './Button';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { INTEGRATION_URL } from '../api/client';
 
 interface StoryboardFile {
   fileName: string;
@@ -86,7 +87,7 @@ export const CapabilityForm: React.FC<CapabilityFormProps> = ({
     console.log('[CapabilityForm] Loading storyboard files from:', currentWorkspace.projectFolder);
     setLoadingStoryboards(true);
     try {
-      const response = await fetch('http://localhost:9080/story-files', {
+      const response = await fetch(`${INTEGRATION_URL}/story-files`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -229,7 +230,7 @@ export const CapabilityForm: React.FC<CapabilityFormProps> = ({
       }
 
       // Save to definition folder
-      const response = await fetch('http://localhost:9080/save-specifications', {
+      const response = await fetch(`${INTEGRATION_URL}/save-specifications`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -5,6 +5,7 @@ import { ApprovalSection } from '../components/ApprovalSection';
 import { StageBadge, ApprovalStatusBadge } from '../components/ApprovalStatusBadge';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { useApproval } from '../context/ApprovalContext';
+import { INTEGRATION_URL } from '../api/client';
 import type {
   Capability,
   CapabilityWithDetails,
@@ -114,7 +115,7 @@ export const Capabilities: React.FC = () => {
 
     setLoadingFiles(true);
     try {
-      const response = await fetch('http://localhost:9080/capability-files', {
+      const response = await fetch(`${INTEGRATION_URL}/capability-files`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -150,7 +151,7 @@ export const Capabilities: React.FC = () => {
 
     setSavingCapability(true);
     try {
-      const response = await fetch('http://localhost:9080/save-capability', {
+      const response = await fetch(`${INTEGRATION_URL}/save-capability`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -199,7 +200,7 @@ export const Capabilities: React.FC = () => {
 
     setDeletingCapability(true);
     try {
-      const response = await fetch('http://localhost:9080/delete-capability', {
+      const response = await fetch(`${INTEGRATION_URL}/delete-capability`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -239,7 +240,7 @@ export const Capabilities: React.FC = () => {
 
     try {
       // First, get the list of specification files
-      const listUrl = `http://localhost:9080/specifications/list?workspace=${encodeURIComponent(currentWorkspace.projectFolder)}`;
+      const listUrl = `${INTEGRATION_URL}/specifications/list?workspace=${encodeURIComponent(currentWorkspace.projectFolder)}`;
       const listResponse = await fetch(listUrl);
 
       if (!listResponse.ok) {
@@ -263,7 +264,7 @@ export const Capabilities: React.FC = () => {
       }
 
       // Analyze with Claude to suggest capabilities
-      const response = await fetch('http://localhost:9080/analyze-capabilities', {
+      const response = await fetch(`${INTEGRATION_URL}/analyze-capabilities`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -325,7 +326,7 @@ export const Capabilities: React.FC = () => {
     markdown += `- [ ] TODO: Define acceptance criteria\n`;
 
     try {
-      const response = await fetch('http://localhost:9080/save-specifications', {
+      const response = await fetch(`${INTEGRATION_URL}/save-specifications`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -3,6 +3,7 @@ import mermaid from 'mermaid';
 import { Button } from '../components/Button';
 import { AIPresetIndicator } from '../components/AIPresetIndicator';
 import { useWorkspace, type SystemCapability, type SystemEnabler } from '../context/WorkspaceContext';
+import { INTEGRATION_URL } from '../api/client';
 
 // Initialize mermaid
 mermaid.initialize({
@@ -412,7 +413,7 @@ export const System: React.FC = () => {
 
       // Save files to definition folder (same folder as Import reads from)
       try {
-        const response = await fetch('http://localhost:9080/save-specifications', {
+        const response = await fetch(`${INTEGRATION_URL}/save-specifications`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -473,7 +474,7 @@ export const System: React.FC = () => {
     markdown += '\n```\n';
 
     try {
-      const response = await fetch('http://localhost:9080/save-specifications', {
+      const response = await fetch(`${INTEGRATION_URL}/save-specifications`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -511,7 +512,7 @@ export const System: React.FC = () => {
     const fileName = 'STATE-STATE-DIAGRAM-1.md';
 
     try {
-      const response = await fetch('http://localhost:9080/read-specification', {
+      const response = await fetch(`${INTEGRATION_URL}/read-specification`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -556,7 +557,7 @@ export const System: React.FC = () => {
     const fileName = 'SEQ-SEQUENCE-DIAGRAM-1.md';
 
     try {
-      const response = await fetch('http://localhost:9080/read-specification', {
+      const response = await fetch(`${INTEGRATION_URL}/read-specification`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -600,7 +601,7 @@ export const System: React.FC = () => {
     const fileName = 'DATA-DATA-MODEL-1.md';
 
     try {
-      const response = await fetch('http://localhost:9080/read-specification', {
+      const response = await fetch(`${INTEGRATION_URL}/read-specification`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -644,7 +645,7 @@ export const System: React.FC = () => {
     const fileName = 'CLASS-CLASS-DIAGRAM-1.md';
 
     try {
-      const response = await fetch('http://localhost:9080/read-specification', {
+      const response = await fetch(`${INTEGRATION_URL}/read-specification`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -785,7 +786,7 @@ export const System: React.FC = () => {
 
       // Save capabilities and enablers to definition folder
       if (definitionFiles.length > 0) {
-        const defResponse = await fetch('http://localhost:9080/save-specifications', {
+        const defResponse = await fetch(`${INTEGRATION_URL}/save-specifications`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -806,7 +807,7 @@ export const System: React.FC = () => {
 
       // Save diagrams to implementation folder
       if (implementationFiles.length > 0) {
-        const implResponse = await fetch('http://localhost:9080/save-specifications', {
+        const implResponse = await fetch(`${INTEGRATION_URL}/save-specifications`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -987,14 +988,14 @@ export const System: React.FC = () => {
       console.log('[System] Fetching capabilities and enablers from definition folder...');
 
       // Fetch capabilities from definition folder
-      const capResponse = await fetch('http://localhost:9080/capability-files', {
+      const capResponse = await fetch(`${INTEGRATION_URL}/capability-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: currentWorkspace.projectFolder }),
       });
 
       // Fetch enablers from definition folder
-      const enbResponse = await fetch('http://localhost:9080/enabler-files', {
+      const enbResponse = await fetch(`${INTEGRATION_URL}/enabler-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: currentWorkspace.projectFolder }),
@@ -1334,13 +1335,13 @@ export const System: React.FC = () => {
 
     try {
       // Fetch capabilities and enablers from definition folder
-      const capResponse = await fetch('http://localhost:9080/capability-files', {
+      const capResponse = await fetch(`${INTEGRATION_URL}/capability-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: currentWorkspace.projectFolder }),
       });
 
-      const enbResponse = await fetch('http://localhost:9080/enabler-files', {
+      const enbResponse = await fetch(`${INTEGRATION_URL}/enabler-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: currentWorkspace.projectFolder }),
@@ -1373,7 +1374,7 @@ export const System: React.FC = () => {
       console.log('[System] Sending', files.length, 'files to Claude for AI analysis...');
 
       // Send to AI for analysis
-      const analyzeResponse = await fetch('http://localhost:9080/specifications/analyze', {
+      const analyzeResponse = await fetch(`${INTEGRATION_URL}/specifications/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1627,14 +1628,14 @@ export const System: React.FC = () => {
       console.log('[System] Generating diagram - fetching from definition folder...');
 
       // Fetch capabilities from definition folder
-      const capResponse = await fetch('http://localhost:9080/capability-files', {
+      const capResponse = await fetch(`${INTEGRATION_URL}/capability-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: currentWorkspace.projectFolder }),
       });
 
       // Fetch enablers from definition folder
-      const enbResponse = await fetch('http://localhost:9080/enabler-files', {
+      const enbResponse = await fetch(`${INTEGRATION_URL}/enabler-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: currentWorkspace.projectFolder }),
@@ -1717,7 +1718,7 @@ export const System: React.FC = () => {
       };
 
       // Call backend to generate diagram
-      const generateResponse = await fetch('http://localhost:9080/specifications/generate-diagram', {
+      const generateResponse = await fetch(`${INTEGRATION_URL}/specifications/generate-diagram`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

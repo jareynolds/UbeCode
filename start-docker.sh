@@ -95,22 +95,22 @@ REQUIRED_SERVICES="postgres auth-service capability-service design-service integ
 # Build Docker images
 echo ""
 echo "📦 Building Docker images..."
-docker-compose build
+docker compose build
 
 # Start services
 echo ""
 echo "🚀 Starting Docker containers..."
-docker-compose up -d
+docker compose up -d
 
 # Function to check if a service is healthy
 check_service_health() {
     local service=$1
-    local status=$(docker-compose ps --format json $service 2>/dev/null | grep -o '"Health":"[^"]*"' | cut -d'"' -f4)
+    local status=$(docker compose ps --format json $service 2>/dev/null | grep -o '"Health":"[^"]*"' | cut -d'"' -f4)
     if [ "$status" == "healthy" ]; then
         return 0
     fi
     # Also check if service is running (for services without health checks)
-    local running=$(docker-compose ps --format json $service 2>/dev/null | grep -o '"State":"[^"]*"' | cut -d'"' -f4)
+    local running=$(docker compose ps --format json $service 2>/dev/null | grep -o '"State":"[^"]*"' | cut -d'"' -f4)
     if [ "$running" == "running" ]; then
         return 0
     fi
@@ -120,7 +120,7 @@ check_service_health() {
 # Function to check if a service is running
 check_service_running() {
     local service=$1
-    local state=$(docker-compose ps $service 2>/dev/null | grep -E "Up|running" | wc -l)
+    local state=$(docker compose ps $service 2>/dev/null | grep -E "Up|running" | wc -l)
     [ "$state" -gt 0 ]
 }
 
@@ -157,7 +157,7 @@ done
 # Final status check
 echo ""
 echo "🔍 Docker Service Status:"
-docker-compose ps
+docker compose ps
 
 # Check for any failed services
 FAILED_SERVICES=""
@@ -174,7 +174,7 @@ if [ -n "$FAILED_SERVICES" ]; then
     echo "Attempting to restart failed services..."
     for service in $FAILED_SERVICES; do
         echo "   Restarting $service..."
-        docker-compose up -d $service
+        docker compose up -d $service
     done
     sleep 5
 
@@ -189,7 +189,7 @@ if [ -n "$FAILED_SERVICES" ]; then
     if [ -n "$STILL_FAILED" ]; then
         echo ""
         echo "❌ Services still failing:$STILL_FAILED"
-        echo "   Check logs with: docker-compose logs <service-name>"
+        echo "   Check logs with: docker compose logs <service-name>"
     else
         echo "✅ All services restarted successfully!"
     fi
@@ -212,12 +212,12 @@ echo "   - Database: ubecode_db"
 echo "   - Username: ubecode_user"
 echo "   - Password: ubecode_password"
 echo ""
-echo "📝 View all logs:             docker-compose logs -f"
-echo "📝 View specific service:     docker-compose logs -f <service-name>"
+echo "📝 View all logs:             docker compose logs -f"
+echo "📝 View specific service:     docker compose logs -f <service-name>"
 echo "   Available services: postgres, auth-service, integration-service, design-service, capability-service"
 echo ""
 echo "🛑 Stop Docker services:      ./stop-docker.sh"
-echo "🗑️  Stop and remove volumes:  docker-compose down -v"
+echo "🗑️  Stop and remove volumes:  docker compose down -v"
 echo ""
 echo "💡 To start the complete application (Docker + Web UI), use:"
 echo "   ./start.sh"

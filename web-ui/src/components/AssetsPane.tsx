@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from './Button';
+import { INTEGRATION_URL } from '../api/client';
 
 interface IntegrationFile {
   id: string;
@@ -67,7 +68,7 @@ export const AssetsPane: React.FC<AssetsPaneProps> = ({ workspaceId, onClose, on
             const updatedFiles = await Promise.all(
               figmaFiles.map(async (file) => {
                 try {
-                  const response = await fetch(`http://localhost:9080/fetch-file-meta`, {
+                  const response = await fetch(`${INTEGRATION_URL}/fetch-file-meta`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

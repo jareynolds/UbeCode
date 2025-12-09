@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, Button, AIPresetIndicator } from '../components';
 import { useWorkspace } from '../context/WorkspaceContext';
 import axios from 'axios';
+import { INTEGRATION_URL } from '../api/client';
 
 interface FigmaProject {
   id: string;
@@ -70,7 +71,7 @@ export const Designs: React.FC = () => {
     try {
       console.log('Fetching Figma projects with team URL:', currentWorkspace.figmaTeamUrl);
 
-      const response = await axios.post('http://localhost:9080/fetch-resources', {
+      const response = await axios.post(`${INTEGRATION_URL}/fetch-resources`, {
         integration_name: 'Figma API',
         credentials: {
           access_token: figmaToken,
@@ -99,7 +100,7 @@ export const Designs: React.FC = () => {
     setSelectedFiles(new Set());
 
     try {
-      const response = await axios.post('http://localhost:9080/fetch-files', {
+      const response = await axios.post(`${INTEGRATION_URL}/fetch-files`, {
         integration_name: 'Figma API',
         resource_id: project.id,
         resource_type: 'project',

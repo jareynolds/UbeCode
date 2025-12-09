@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, Alert, Button, AIPresetIndicator } from '../components';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { INTEGRATION_URL } from '../api/client';
 
 interface FileTheme {
   filename: string;
@@ -66,7 +67,7 @@ export const Vision: React.FC = () => {
 
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:9080/theme-files', {
+      const response = await fetch(`${INTEGRATION_URL}/theme-files`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -139,7 +140,7 @@ export const Vision: React.FC = () => {
         path = `${currentWorkspace.projectFolder}/conception/${fileName}`;
       }
 
-      const response = await fetch('http://localhost:9080/save-theme', {
+      const response = await fetch(`${INTEGRATION_URL}/save-theme`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -180,7 +181,7 @@ export const Vision: React.FC = () => {
 
     setDeletingTheme(true);
     try {
-      const response = await fetch('http://localhost:9080/delete-theme', {
+      const response = await fetch(`${INTEGRATION_URL}/delete-theme`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

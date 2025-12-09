@@ -82,7 +82,12 @@ update_system() {
             apt-get upgrade -y
             apt-get install -y curl wget git build-essential software-properties-common
             ;;
-        amzn|rhel|centos|fedora)
+        amzn)
+            # Amazon Linux 2023 uses dnf
+            dnf update -y
+            dnf install -y wget git gcc gcc-c++ make tar gzip --allowerasing
+            ;;
+        rhel|centos|fedora)
             yum update -y
             yum install -y curl wget git gcc gcc-c++ make
             ;;
@@ -116,13 +121,19 @@ install_docker() {
             ;;
         amzn)
             # Amazon Linux 2023
-            yum install -y docker
+            dnf install -y docker --allowerasing
             systemctl start docker
             systemctl enable docker
 
-            # Install Docker Compose
-            curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-            chmod +x /usr/local/bin/docker-compose
+            # Install Docker Compose plugin
+            mkdir -p /usr/local/lib/docker/cli-plugins
+            COMPOSE_ARCH=$(uname -m)
+            # Map architecture names
+            if [ "$COMPOSE_ARCH" = "aarch64" ]; then
+                COMPOSE_ARCH="aarch64"
+            fi
+            curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${COMPOSE_ARCH}" -o /usr/local/lib/docker/cli-plugins/docker-compose
+            chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
             ;;
         *)
             echo -e "${RED}Unsupported OS for Docker installation${NC}"
@@ -152,7 +163,12 @@ install_nodejs() {
             curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
             apt-get install -y nodejs
             ;;
-        amzn|rhel|centos|fedora)
+        amzn)
+            # Amazon Linux 2023 - use dnf
+            curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+            dnf install -y nodejs --allowerasing
+            ;;
+        rhel|centos|fedora)
             curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
             yum install -y nodejs
             ;;
@@ -181,7 +197,27 @@ install_go() {
     fi
 
     GO_VERSION="1.24.0"
-    wget -q "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -O /tmp/go.tar.gz
+
+    # Detect architecture
+    ARCH=$(uname -m)
+    case $ARCH in
+        x86_64)
+            GO_ARCH="amd64"
+            ;;
+        aarch64|arm64)
+            GO_ARCH="arm64"
+            ;;
+        armv7l)
+            GO_ARCH="armv6l"
+            ;;
+        *)
+            echo -e "${RED}Unsupported architecture: $ARCH${NC}"
+            exit 1
+            ;;
+    esac
+
+    echo -e "${CYAN}Downloading Go ${GO_VERSION} for linux-${GO_ARCH}...${NC}"
+    wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" -O /tmp/go.tar.gz
     rm -rf /usr/local/go
     tar -C /usr/local -xzf /tmp/go.tar.gz
     rm /tmp/go.tar.gz
@@ -202,9 +238,19 @@ create_app_user() {
     if id "$APP_USER" &>/dev/null; then
         echo -e "${GREEN}User $APP_USER already exists${NC}"
     else
-        useradd -r -m -s /bin/bash "$APP_USER"
+        # Create user with home directory (not a system user)
+        useradd -m -s /bin/bash "$APP_USER"
         echo -e "${GREEN}User $APP_USER created${NC}"
     fi
+
+    # Ensure home directory exists
+    USER_HOME=$(getent passwd "$APP_USER" | cut -d: -f6)
+    if [ -z "$USER_HOME" ] || [ ! -d "$USER_HOME" ]; then
+        USER_HOME="/home/$APP_USER"
+        mkdir -p "$USER_HOME"
+        chown "$APP_USER:$APP_USER" "$USER_HOME"
+    fi
+    echo -e "${CYAN}User home directory: $USER_HOME${NC}"
 
     # Add user to docker group
     usermod -aG docker "$APP_USER"
@@ -310,10 +356,32 @@ install_dependencies() {
 
     cd "$APP_DIR"
 
+    # Get the actual home directory for the app user
+    USER_HOME=$(getent passwd "$APP_USER" | cut -d: -f6)
+    if [ -z "$USER_HOME" ]; then
+        USER_HOME="/home/$APP_USER"
+    fi
+    echo -e "${CYAN}Using home directory: $USER_HOME${NC}"
+
+    # Ensure home directory exists with correct ownership
+    if [ ! -d "$USER_HOME" ]; then
+        echo -e "${CYAN}Creating home directory for $APP_USER...${NC}"
+        mkdir -p "$USER_HOME"
+    fi
+    chown -R "$APP_USER:$APP_USER" "$USER_HOME"
+
+    # Create npm cache directory with correct ownership (as root, then chown)
+    echo -e "${CYAN}Setting up npm cache directory...${NC}"
+    mkdir -p "$USER_HOME/.npm"
+    chown -R "$APP_USER:$APP_USER" "$USER_HOME/.npm"
+
+    # Ensure web-ui directory has correct ownership
+    chown -R "$APP_USER:$APP_USER" "$APP_DIR/web-ui"
+
     # Install Node.js dependencies for web-ui
     echo -e "${CYAN}Installing web-ui dependencies...${NC}"
     cd "$APP_DIR/web-ui"
-    sudo -u "$APP_USER" npm install
+    sudo -u "$APP_USER" npm install --cache "$USER_HOME/.npm"
 
     # Build web-ui for production
     echo -e "${CYAN}Building web-ui for production...${NC}"
@@ -324,6 +392,10 @@ install_dependencies() {
     # Build Go services
     echo -e "${CYAN}Building Go services...${NC}"
     export PATH=$PATH:/usr/local/go/bin
+
+    # Create bin directory with correct ownership
+    mkdir -p "$APP_DIR/bin"
+    chown -R "$APP_USER:$APP_USER" "$APP_DIR/bin"
 
     # Build Claude Proxy
     if [ -f "$APP_DIR/cmd/claude-proxy/main.go" ]; then
@@ -357,6 +429,12 @@ setup_systemd_services() {
 
 # Create systemd service files
 create_systemd_services() {
+    # Get the actual home directory for the app user
+    USER_HOME=$(getent passwd "$APP_USER" | cut -d: -f6)
+    if [ -z "$USER_HOME" ]; then
+        USER_HOME="/home/$APP_USER"
+    fi
+
     # Docker services (PostgreSQL and Go microservices)
     cat > /etc/systemd/system/ubecode-docker.service << EOF
 [Unit]
@@ -392,7 +470,7 @@ ExecReload=/usr/bin/pm2 reload ecosystem.config.js
 ExecStop=/usr/bin/pm2 stop ecosystem.config.js
 User=$APP_USER
 Environment=NODE_ENV=production
-PIDFile=/home/$APP_USER/.pm2/pm2.pid
+PIDFile=$USER_HOME/.pm2/pm2.pid
 
 [Install]
 WantedBy=multi-user.target
@@ -649,6 +727,12 @@ configure_firewall() {
 start_services() {
     print_section "Starting Services"
 
+    # Get the actual home directory for the app user
+    USER_HOME=$(getent passwd "$APP_USER" | cut -d: -f6)
+    if [ -z "$USER_HOME" ]; then
+        USER_HOME="/home/$APP_USER"
+    fi
+
     # Start Docker services
     echo -e "${CYAN}Starting Docker services...${NC}"
     systemctl start ubecode-docker.service
@@ -663,7 +747,7 @@ start_services() {
     sudo -u "$APP_USER" pm2 save
 
     # Setup PM2 to start on boot
-    env PATH=$PATH:/usr/bin pm2 startup systemd -u "$APP_USER" --hp /home/"$APP_USER"
+    env PATH=$PATH:/usr/bin pm2 startup systemd -u "$APP_USER" --hp "$USER_HOME"
 
     # Start frontend service
     echo -e "${CYAN}Starting frontend service...${NC}"

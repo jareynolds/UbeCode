@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, Button } from '../components';
 import { useWorkspace } from '../context/WorkspaceContext';
 import axios from 'axios';
+import { INTEGRATION_URL } from '../api/client';
 
 interface IntegrationResource {
   id: string;
@@ -61,7 +62,7 @@ export const Designs: React.FC = () => {
         throw new Error(`${integrationName} is not configured`);
       }
 
-      const response = await axios.post('http://localhost:9080/fetch-files', {
+      const response = await axios.post(`${INTEGRATION_URL}/fetch-files`, {
         integration_name: integrationName,
         resource_id: resource.id,
         resource_type: resource.type,

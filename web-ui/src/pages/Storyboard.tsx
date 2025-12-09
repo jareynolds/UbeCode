@@ -6,6 +6,7 @@ import { useCollaboration } from '../context/CollaborationContext';
 import RemoteCursors from '../components/RemoteCursors';
 import { AssetsPane } from '../components/AssetsPane';
 import { AIPresetIndicator, ConfirmDialog } from '../components';
+import { INTEGRATION_URL, SPEC_URL } from '../api/client';
 
 export const Storyboard: React.FC = () => {
   const { currentWorkspace, updateStoryboard } = useWorkspace();
@@ -210,7 +211,7 @@ export const Storyboard: React.FC = () => {
 
     try {
       // Fetch STORY-*.md files from conception folder
-      const response = await fetch('http://localhost:9080/read-storyboard-files', {
+      const response = await fetch(`${INTEGRATION_URL}/read-storyboard-files`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -438,7 +439,7 @@ export const Storyboard: React.FC = () => {
 
     try {
       // First try to load from existing storyboards-full.md
-      let response = await fetch('http://localhost:9080/analyze-storyboard', {
+      let response = await fetch(`${INTEGRATION_URL}/analyze-storyboard`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -461,7 +462,7 @@ export const Storyboard: React.FC = () => {
         }
 
         // Generate new analysis from STORY*.md, dependencies.md, site-architecture.md
-        response = await fetch('http://localhost:9080/analyze-storyboard', {
+        response = await fetch(`${INTEGRATION_URL}/analyze-storyboard`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1094,7 +1095,7 @@ export const Storyboard: React.FC = () => {
         // If the card was loaded from a file, delete the file first
         if (hasSourceFile && card?.sourceFileName) {
           try {
-            const response = await fetch('http://localhost:4001/api/delete-specification', {
+            const response = await fetch(`${SPEC_URL}/delete-specification`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -1386,7 +1387,7 @@ export const Storyboard: React.FC = () => {
         throw new Error('Workspace project folder not configured');
       }
 
-      const response = await fetch('http://localhost:9080/save-specifications', {
+      const response = await fetch(`${INTEGRATION_URL}/save-specifications`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

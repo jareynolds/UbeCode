@@ -3,6 +3,7 @@ import { Button } from '../components/Button';
 import { AIPresetIndicator } from '../components/AIPresetIndicator';
 import { useWorkspace } from '../context/WorkspaceContext';
 import axios from 'axios';
+import { SPEC_URL } from '../api/client';
 
 interface ColorConfig {
   name: string;
@@ -1603,7 +1604,7 @@ This UI Style specification should be used in conjunction with the active UI Fra
       const fileName = 'UI-STYLE.md';
 
       // Call backend API to save the file (port 4001 is the workspace server)
-      await axios.post('http://localhost:4001/api/save-specification', {
+      await axios.post(`${SPEC_URL}/save-specification`, {
         fileName: fileName,
         content: specification,
         workspacePath: currentWorkspace.projectFolder,

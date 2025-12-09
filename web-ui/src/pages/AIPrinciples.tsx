@@ -4,6 +4,7 @@ import { Button } from '../components/Button';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { AIPresetIndicator } from '../components/AIPresetIndicator';
 import { UIFrameworkIndicator } from '../components/UIFrameworkIndicator';
+import { INTEGRATION_URL } from '../api/client';
 
 const presetDescriptions = [
   {
@@ -92,7 +93,7 @@ export const AIPrinciples: React.FC = () => {
     try {
       // Copy the preset policy file to the workspace specifications folder
       if (currentWorkspace.projectFolder) {
-        const response = await fetch('http://localhost:9080/activate-ai-preset', {
+        const response = await fetch(`${INTEGRATION_URL}/activate-ai-preset`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

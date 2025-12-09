@@ -65,10 +65,10 @@ fi
 
 # Build and start backend services
 echo "📦 Building Docker images..."
-docker-compose build
+docker compose build
 
 echo "🔄 Starting backend services..."
-docker-compose up -d
+docker compose up -d
 
 echo ""
 echo "⏳ Waiting for services to be healthy..."
@@ -77,7 +77,7 @@ sleep 5
 # Check service health
 echo ""
 echo "🔍 Backend Service Status:"
-docker-compose ps
+docker compose ps
 
 # Start API server for markdown export in background
 echo ""
@@ -132,8 +132,8 @@ echo "   - Email:    admin@ubecode.local"
 echo "   - Password: admin123"
 echo "   - ⚠️  Change password after first login!"
 echo ""
-echo "📝 View backend logs:         docker-compose logs -f"
-echo "📝 View auth service logs:    docker-compose logs -f auth-service"
+echo "📝 View backend logs:         docker compose logs -f"
+echo "📝 View auth service logs:    docker compose logs -f auth-service"
 echo "📝 View web UI logs:          tail -f web-ui.log"
 echo "📝 View API server logs:      tail -f api-server.log"
 echo "📝 View collaboration logs:   tail -f collab-server.log"

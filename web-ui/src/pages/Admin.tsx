@@ -32,6 +32,11 @@ interface EditUserForm {
   isActive?: boolean;
 }
 
+interface ResetPasswordForm {
+  newPassword: string;
+  confirmPassword: string;
+}
+
 // Helper function to display role names
 const getRoleDisplayName = (role: string): string => {
   const roleMap: Record<string, string> = {
@@ -53,6 +58,11 @@ const Admin: React.FC = () => {
   const [success, setSuccess] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingUser, setEditingUser] = useState<number | null>(null);
+  const [resetPasswordUser, setResetPasswordUser] = useState<User | null>(null);
+  const [resetPasswordForm, setResetPasswordForm] = useState<ResetPasswordForm>({
+    newPassword: '',
+    confirmPassword: '',
+  });
 
   const [createForm, setCreateForm] = useState<CreateUserForm>({
     email: '',
@@ -149,6 +159,43 @@ const Admin: React.FC = () => {
   const cancelEdit = () => {
     setEditingUser(null);
     setEditForm({});
+  };
+
+  const openResetPassword = (user: User) => {
+    setResetPasswordUser(user);
+    setResetPasswordForm({ newPassword: '', confirmPassword: '' });
+  };
+
+  const closeResetPassword = () => {
+    setResetPasswordUser(null);
+    setResetPasswordForm({ newPassword: '', confirmPassword: '' });
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetPasswordUser) return;
+
+    if (resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    if (resetPasswordForm.newPassword.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
+    try {
+      setError(null);
+      await authClient.put(`/api/users/${resetPasswordUser.id}`, {
+        password: resetPasswordForm.newPassword,
+      });
+      setSuccess(`Password reset successfully for ${resetPasswordUser.name}`);
+      closeResetPassword();
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to reset password');
+    }
   };
 
   if (currentUser?.role !== 'admin') {
@@ -383,8 +430,15 @@ const Admin: React.FC = () => {
                           {user.lastLogin ? new Date(user.lastLogin).toLocaleString() : 'Never'}
                         </td>
                         <td style={{ padding: '10px' }}>
-                          <div style={{ display: 'flex', gap: '5px' }}>
+                          <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
                             <Button size="small" onClick={() => startEditUser(user)}>Edit</Button>
+                            <Button
+                              size="small"
+                              variant="secondary"
+                              onClick={() => openResetPassword(user)}
+                            >
+                              Reset Password
+                            </Button>
                             <Button
                               size="small"
                               variant="secondary"
@@ -408,6 +462,102 @@ const Admin: React.FC = () => {
     ) : (
       <RoleManagement />
     )}
+
+      {/* Reset Password Modal */}
+      {resetPasswordUser && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div style={{
+            backgroundColor: 'var(--color-surface, white)',
+            borderRadius: '8px',
+            padding: '24px',
+            width: '100%',
+            maxWidth: '400px',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+          }}>
+            <h3 style={{ marginTop: 0, marginBottom: '16px' }}>
+              Reset Password for {resetPasswordUser.name}
+            </h3>
+            <p style={{ color: 'var(--color-grey-600)', marginBottom: '20px', fontSize: '14px' }}>
+              Enter a new password for <strong>{resetPasswordUser.email}</strong>
+            </p>
+            <form onSubmit={handleResetPassword}>
+              <div style={{ marginBottom: '16px' }}>
+                <label htmlFor="new-password" style={{ display: 'block', marginBottom: '6px', fontWeight: 500 }}>
+                  New Password
+                </label>
+                <input
+                  id="new-password"
+                  type="password"
+                  required
+                  minLength={6}
+                  value={resetPasswordForm.newPassword}
+                  onChange={(e) => setResetPasswordForm({ ...resetPasswordForm, newPassword: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--color-grey-300)',
+                    fontSize: '14px',
+                    boxSizing: 'border-box',
+                  }}
+                  placeholder="Minimum 6 characters"
+                />
+              </div>
+              <div style={{ marginBottom: '20px' }}>
+                <label htmlFor="confirm-password" style={{ display: 'block', marginBottom: '6px', fontWeight: 500 }}>
+                  Confirm Password
+                </label>
+                <input
+                  id="confirm-password"
+                  type="password"
+                  required
+                  minLength={6}
+                  value={resetPasswordForm.confirmPassword}
+                  onChange={(e) => setResetPasswordForm({ ...resetPasswordForm, confirmPassword: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--color-grey-300)',
+                    fontSize: '14px',
+                    boxSizing: 'border-box',
+                  }}
+                  placeholder="Re-enter password"
+                />
+              </div>
+              {resetPasswordForm.newPassword && resetPasswordForm.confirmPassword &&
+                resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword && (
+                <p style={{ color: 'var(--color-error)', fontSize: '13px', marginBottom: '16px' }}>
+                  Passwords do not match
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <Button type="button" variant="secondary" onClick={closeResetPassword}>
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={!resetPasswordForm.newPassword || !resetPasswordForm.confirmPassword ||
+                    resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword}
+                >
+                  Reset Password
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

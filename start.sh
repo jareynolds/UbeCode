@@ -119,12 +119,12 @@ if ! command_exists docker; then
 fi
 echo -e "  ${GREEN}✓${NC} Docker found"
 
-if ! command_exists docker-compose && ! docker compose version >/dev/null 2>&1; then
-    echo -e "${RED}Error: docker-compose is not installed${NC}"
-    echo "Please install docker-compose"
+if ! command_exists docker compose && ! docker compose version >/dev/null 2>&1; then
+    echo -e "${RED}Error: docker compose is not installed${NC}"
+    echo "Please install docker compose"
     exit 1
 fi
-echo -e "  ${GREEN}✓${NC} docker-compose found"
+echo -e "  ${GREEN}✓${NC} docker compose found"
 
 if ! command_exists node; then
     echo -e "${RED}Error: Node.js is not installed${NC}"
@@ -183,9 +183,9 @@ echo ""
 echo -e "${YELLOW}Checking for running services...${NC}"
 
 # Check Docker containers
-if docker-compose ps -q 2>/dev/null | grep -q .; then
+if docker compose ps -q 2>/dev/null | grep -q .; then
     echo -e "${YELLOW}Stopping existing Docker containers...${NC}"
-    docker-compose down
+    docker compose down
     sleep 2
 fi
 
@@ -231,15 +231,15 @@ cd "$ROOT_DIR"
 
 if [ -n "$BUILD_FLAG" ]; then
     echo -e "${YELLOW}Building Docker containers...${NC}"
-    docker-compose build
+    docker compose build
     echo ""
 fi
 
-docker-compose up -d
+docker compose up -d
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to start Docker services${NC}"
-    echo "Run 'docker-compose logs' for details"
+    echo "Run 'docker compose logs' for details"
     exit 1
 fi
 
@@ -250,7 +250,7 @@ echo -e "${YELLOW}Waiting for Docker services to be healthy...${NC}"
 echo -ne "${CYAN}  Checking PostgreSQL...${NC}"
 attempt=0
 while [ $attempt -lt 30 ]; do
-    if docker-compose exec -T postgres pg_isready -U ubecode_user -d ubecode_db > /dev/null 2>&1; then
+    if docker compose exec -T postgres pg_isready -U ubecode_user -d ubecode_db > /dev/null 2>&1; then
         echo -e " ${GREEN}✓${NC}"
         break
     fi
@@ -262,32 +262,32 @@ done
 if [ $attempt -eq 30 ]; then
     echo -e " ${RED}✗ (timeout)${NC}"
     echo -e "${RED}PostgreSQL failed to start${NC}"
-    docker-compose logs postgres
+    docker compose logs postgres
     exit 1
 fi
 
 # Wait for backend services
 wait_for_service "http://localhost:9080/health" "Integration Service" || {
     echo -e "${RED}Integration Service failed to start${NC}"
-    docker-compose logs integration-service
+    docker compose logs integration-service
     exit 1
 }
 
 wait_for_service "http://localhost:9081/health" "Design Service" || {
     echo -e "${RED}Design Service failed to start${NC}"
-    docker-compose logs design-service
+    docker compose logs design-service
     exit 1
 }
 
 wait_for_service "http://localhost:9082/health" "Capability Service" || {
     echo -e "${RED}Capability Service failed to start${NC}"
-    docker-compose logs capability-service
+    docker compose logs capability-service
     exit 1
 }
 
 wait_for_service "http://localhost:9083/health" "Auth Service" || {
     echo -e "${RED}Auth Service failed to start${NC}"
-    docker-compose logs auth-service
+    docker compose logs auth-service
     exit 1
 }
 
@@ -390,19 +390,19 @@ echo -e "${BOLD}${BLUE}Starting Frontend (Vite Dev Server)...${NC}"
 echo ""
 
 if [ "$VITE_FOREGROUND" = true ]; then
-    echo -e "${CYAN}Starting Vite dev server in foreground (port 6173)...${NC}"
+    echo -e "${CYAN}Starting Vite dev server in foreground (port 6175)...${NC}"
     echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
     echo ""
     npm run dev
 else
-    echo -e "${CYAN}Starting Vite dev server in background (port 6173)...${NC}"
+    echo -e "${CYAN}Starting Vite dev server in background (port 6175)...${NC}"
     npm run dev > "$VITE_LOG" 2>&1 &
     echo $! > "$VITE_PID"
 
     # Wait a bit longer for Vite to start
     sleep 3
 
-    if wait_for_service "http://localhost:6173" "Vite Dev Server"; then
+    if wait_for_service "http://localhost:6175" "Vite Dev Server"; then
         echo -e "  ${GREEN}✓${NC} Vite dev server started (PID: $(cat $VITE_PID))"
     else
         echo -e "  ${YELLOW}⚠${NC} Vite dev server may still be starting..."
@@ -418,7 +418,7 @@ echo -e "${BOLD}${GREEN}  UbeCode Application Started!${NC}"
 echo -e "${BOLD}${GREEN}========================================${NC}"
 echo ""
 echo -e "${BOLD}Service URLs:${NC}"
-echo -e "  ${CYAN}Frontend (Web UI):${NC}       http://localhost:6173"
+echo -e "  ${CYAN}Frontend (Web UI):${NC}       http://localhost:6175"
 echo -e "  ${CYAN}Integration Service:${NC}     http://localhost:9080"
 echo -e "  ${CYAN}Design Service:${NC}          http://localhost:9081"
 echo -e "  ${CYAN}Capability Service:${NC}      http://localhost:9082"
@@ -430,7 +430,7 @@ echo -e "  ${CYAN}Shared Workspace API:${NC}    http://localhost:4002"
 echo -e "  ${CYAN}PostgreSQL:${NC}              localhost:6432"
 echo ""
 echo -e "${BOLD}Logs:${NC}"
-echo -e "  Docker services:         ${CYAN}docker-compose logs -f${NC}"
+echo -e "  Docker services:         ${CYAN}docker compose logs -f${NC}"
 echo -e "  Specification API:       ${CYAN}tail -f $SPEC_API_LOG${NC}"
 echo -e "  Collaboration Server:    ${CYAN}tail -f $COLLAB_LOG${NC}"
 echo -e "  Shared Workspace API:    ${CYAN}tail -f $SHARED_WS_LOG${NC}"
@@ -445,5 +445,5 @@ echo ""
 if [ "$SHOW_LOGS" = true ]; then
     echo -e "${YELLOW}Showing Docker logs (Ctrl+C to exit)...${NC}"
     echo ""
-    docker-compose logs -f
+    docker compose logs -f
 fi

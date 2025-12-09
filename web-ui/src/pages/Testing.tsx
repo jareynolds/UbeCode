@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Card, Alert, Button, ConfirmDialog } from '../components';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { INTEGRATION_URL } from '../api/client';
 
 // Test Scenario interface
 interface TestScenario {
@@ -114,7 +115,7 @@ Scenario: [Scenario Name]
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:9080/enabler-files', {
+      const response = await fetch(`${INTEGRATION_URL}/enabler-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: currentWorkspace.projectFolder }),

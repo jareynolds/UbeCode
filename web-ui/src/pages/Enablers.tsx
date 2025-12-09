@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Card, Alert, Button, ConfirmDialog } from '../components';
 import { useEnabler } from '../context/EnablerContext';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { INTEGRATION_URL } from '../api/client';
 
 // File-based capability from workspace definition folder
 interface FileCapability {
@@ -254,7 +255,7 @@ export const Enablers: React.FC = () => {
 
     setLoadingCapabilities(true);
     try {
-      const response = await fetch('http://localhost:9080/capability-files', {
+      const response = await fetch(`${INTEGRATION_URL}/capability-files`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -296,7 +297,7 @@ export const Enablers: React.FC = () => {
 
     setLoadingFileEnablers(true);
     try {
-      const response = await fetch('http://localhost:9080/enabler-files', {
+      const response = await fetch(`${INTEGRATION_URL}/enabler-files`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -452,7 +453,7 @@ ${capabilityList}
 Which capability ID is the BEST match for this enabler?
 Respond with ONLY the capability ID (e.g., "CAP-123456") and nothing else. If no good match exists, respond with "NONE".`;
 
-      const response = await fetch('http://localhost:9080/ai-chat', {
+      const response = await fetch(`${INTEGRATION_URL}/ai-chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -588,7 +589,7 @@ Respond with ONLY the capability ID (e.g., "CAP-123456") and nothing else. If no
       markdown += `## Acceptance Criteria\n_No acceptance criteria defined yet._\n`;
 
       // Save to definition folder
-      const response = await fetch('http://localhost:9080/save-specifications', {
+      const response = await fetch(`${INTEGRATION_URL}/save-specifications`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -628,7 +629,7 @@ Respond with ONLY the capability ID (e.g., "CAP-123456") and nothing else. If no
       onConfirm: async () => {
         closeConfirmDialog();
         try {
-          const response = await fetch('http://localhost:9080/delete-specification', {
+          const response = await fetch(`${INTEGRATION_URL}/delete-specification`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

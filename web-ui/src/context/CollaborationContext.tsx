@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
+import { getCollaborationUrl } from '../api/client';
 
 interface User {
   id: string;
@@ -47,8 +48,6 @@ export const useCollaboration = () => {
   return context;
 };
 
-const COLLABORATION_SERVER_URL = 'http://localhost:9084';
-
 export const CollaborationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -62,7 +61,7 @@ export const CollaborationProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     if (!user) return;
 
-    const newSocket = io(COLLABORATION_SERVER_URL, {
+    const newSocket = io(getCollaborationUrl(), {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1000,

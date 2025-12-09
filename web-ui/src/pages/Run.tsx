@@ -4,6 +4,7 @@ import { Card } from '../components/Card';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { AIPresetIndicator } from '../components/AIPresetIndicator';
 import { UIFrameworkIndicator } from '../components/UIFrameworkIndicator';
+import { INTEGRATION_URL } from '../api/client';
 
 interface RunStep {
   step: number;
@@ -39,7 +40,7 @@ export const Run: React.FC = () => {
     ]);
 
     try {
-      const response = await fetch('http://localhost:9080/run-app', {
+      const response = await fetch(`${INTEGRATION_URL}/run-app`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -94,7 +95,7 @@ export const Run: React.FC = () => {
     if (!currentWorkspace?.projectFolder) return;
 
     try {
-      const response = await fetch('http://localhost:9080/stop-app', {
+      const response = await fetch(`${INTEGRATION_URL}/stop-app`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

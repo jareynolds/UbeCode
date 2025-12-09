@@ -97,15 +97,15 @@ check_docker_container() {
     local container_name=$1
     local service_name=$2
 
-    local status=$(docker-compose ps -q "$container_name" 2>/dev/null)
+    local status=$(docker compose ps -q "$container_name" 2>/dev/null)
 
     if [ -z "$status" ]; then
         echo -e "  ${RED}●${NC} $service_name - ${RED}Not running${NC}"
         return 1
     fi
 
-    local health=$(docker inspect --format='{{.State.Health.Status}}' $(docker-compose ps -q "$container_name") 2>/dev/null || echo "unknown")
-    local state=$(docker inspect --format='{{.State.Status}}' $(docker-compose ps -q "$container_name") 2>/dev/null || echo "unknown")
+    local health=$(docker inspect --format='{{.State.Health.Status}}' $(docker compose ps -q "$container_name") 2>/dev/null || echo "unknown")
+    local state=$(docker inspect --format='{{.State.Status}}' $(docker compose ps -q "$container_name") 2>/dev/null || echo "unknown")
 
     if [ "$state" = "running" ]; then
         if [ "$health" = "healthy" ]; then
@@ -218,13 +218,13 @@ check_status() {
 
     if [ "$WATCH_MODE" = false ]; then
         echo -e "${BOLD}Quick Commands:${NC}"
-        echo -e "  View logs:           ${CYAN}docker-compose logs -f${NC}"
+        echo -e "  View logs:           ${CYAN}docker compose logs -f${NC}"
         echo -e "  Restart services:    ${CYAN}./stop.sh && ./start.sh${NC}"
         echo -e "  Watch status:        ${CYAN}./status.sh --watch${NC}"
         echo ""
 
         echo -e "${BOLD}Service URLs:${NC}"
-        echo -e "  Frontend:            ${CYAN}http://localhost:6173${NC}"
+        echo -e "  Frontend:            ${CYAN}http://localhost:6175${NC}"
         echo -e "  Integration API:     ${CYAN}http://localhost:9080${NC}"
         echo -e "  Design API:          ${CYAN}http://localhost:9081${NC}"
         echo -e "  Capability API:      ${CYAN}http://localhost:9082${NC}"

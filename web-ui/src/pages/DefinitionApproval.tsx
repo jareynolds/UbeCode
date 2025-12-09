@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Alert, Button } from '../components';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { INTEGRATION_URL } from '../api/client';
 
 interface DefinitionItem {
   id: string;
@@ -78,7 +79,7 @@ export const DefinitionApproval: React.FC = () => {
     setLoading(true);
     try {
       // Load capability items
-      const capabilityResponse = await fetch('http://localhost:9080/capability-files', {
+      const capabilityResponse = await fetch(`${INTEGRATION_URL}/capability-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: currentWorkspace.projectFolder }),
@@ -95,7 +96,7 @@ export const DefinitionApproval: React.FC = () => {
       }));
 
       // Load enabler items
-      const enablerResponse = await fetch('http://localhost:9080/enabler-files', {
+      const enablerResponse = await fetch(`${INTEGRATION_URL}/enabler-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: currentWorkspace.projectFolder }),

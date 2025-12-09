@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 import { useAuth } from './AuthContext';
+import { SPEC_URL } from '../api/client';
 import {
   type Enabler,
   type EnablerWithDetails,
@@ -584,7 +585,7 @@ export const EnablerProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const deleteSpecification = useCallback(async (fileName: string, workspacePath?: string) => {
     try {
-      const response = await fetch('http://localhost:4001/api/delete-specification', {
+      const response = await fetch(`${SPEC_URL}/delete-specification`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fileName, workspacePath, subfolder: 'definition' }),
@@ -613,7 +614,7 @@ export const EnablerProvider: React.FC<{ children: ReactNode }> = ({ children })
       // Generate updated markdown content from the specification
       const content = generateEnablerMarkdown(spec);
 
-      const response = await fetch('http://localhost:4001/api/save-specification', {
+      const response = await fetch(`${SPEC_URL}/save-specification`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

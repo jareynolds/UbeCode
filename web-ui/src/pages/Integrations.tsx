@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Card, Alert, Button, AIPresetIndicator } from '../components';
 import axios from 'axios';
+import { INTEGRATION_URL } from '../api/client';
 
 interface IntegrationConfig {
   name: string;
@@ -142,7 +143,7 @@ export const Integrations: React.FC = () => {
       }
 
       // Call the integration analysis endpoint
-      const response = await axios.post('http://localhost:9080/analyze-integration', {
+      const response = await axios.post(`${INTEGRATION_URL}/analyze-integration`, {
         provider_url: url,
         provider_name: name,
         anthropic_key: anthropicKey

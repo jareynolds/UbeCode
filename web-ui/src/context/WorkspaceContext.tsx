@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 import axios from 'axios';
+import { INTEGRATION_URL, WORKSPACE_URL } from '../api/client';
 
-const SHARED_WORKSPACE_API = 'http://localhost:4002/api';
+const SHARED_WORKSPACE_API = `${WORKSPACE_URL}/api`;
 
 export interface StoryCard {
   id: string;
@@ -426,7 +427,7 @@ export const WorkspaceProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     // Ensure workspace folder structure exists
     try {
-      await fetch('http://localhost:9080/folders/ensure-workspace-structure', {
+      await fetch(`${INTEGRATION_URL}/folders/ensure-workspace-structure`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: projectFolder }),
@@ -437,7 +438,7 @@ export const WorkspaceProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     // Save .ubeworkspace configuration file
     try {
-      await fetch('http://localhost:9080/workspace-config/save', {
+      await fetch(`${INTEGRATION_URL}/workspace-config/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -486,7 +487,7 @@ export const WorkspaceProvider: React.FC<{ children: ReactNode }> = ({ children 
     const updatedWorkspace = updatedWorkspaces.find(w => w.id === id);
     if (updatedWorkspace?.projectFolder) {
       try {
-        await fetch('http://localhost:9080/workspace-config/save', {
+        await fetch(`${INTEGRATION_URL}/workspace-config/save`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

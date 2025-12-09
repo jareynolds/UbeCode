@@ -1,4 +1,4 @@
-import { capabilityClient, apiRequest } from './client';
+import { capabilityClient, apiRequest, SPEC_URL } from './client';
 
 // ========================
 // Enabler Types
@@ -800,7 +800,7 @@ export interface EnablerSpecificationsResponse {
 // Specification API Functions
 // ========================
 
-const SPECIFICATION_API_URL = 'http://localhost:4001';
+const SPECIFICATION_API_URL = SPEC_URL;
 
 /**
  * Read enabler specifications from the specifications folder

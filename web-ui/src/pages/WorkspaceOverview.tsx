@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Card, Button } from '../components';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { useAuth } from '../context/AuthContext';
+import { INTEGRATION_URL } from '../api/client';
 
 interface FileCapability {
   filename: string;
@@ -32,7 +33,7 @@ export const WorkspaceOverview: React.FC = () => {
 
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:9080/capability-files', {
+      const response = await fetch(`${INTEGRATION_URL}/capability-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspacePath: currentWorkspace.projectFolder }),

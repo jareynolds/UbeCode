@@ -4,6 +4,7 @@ import { Card } from '../components/Card';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { AIPresetIndicator } from '../components/AIPresetIndicator';
 import { UIFrameworkIndicator } from '../components/UIFrameworkIndicator';
+import { INTEGRATION_URL } from '../api/client';
 
 interface CodeFile {
   name: string;
@@ -66,7 +67,7 @@ export const Code: React.FC = () => {
     if (!currentWorkspace?.projectFolder) return;
 
     try {
-      const response = await fetch('http://localhost:9080/code-files', {
+      const response = await fetch(`${INTEGRATION_URL}/code-files`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -183,7 +184,7 @@ export const Code: React.FC = () => {
       addLog('info', 'Sending request to /generate-code-cli endpoint...');
       addLog('info', 'Using Claude CLI for code generation (no API key required)');
 
-      const response = await fetch('http://localhost:9080/generate-code-cli', {
+      const response = await fetch(`${INTEGRATION_URL}/generate-code-cli`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

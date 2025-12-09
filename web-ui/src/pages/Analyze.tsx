@@ -3,6 +3,7 @@ import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { AIPresetIndicator } from '../components/AIPresetIndicator';
+import { INTEGRATION_URL } from '../api/client';
 
 interface AnalysisFile {
   name: string;
@@ -55,7 +56,7 @@ export const Analyze: React.FC = () => {
 
     try {
       // Fetch files from specifications, code, and assets folders
-      const response = await fetch('http://localhost:9080/analysis-files', {
+      const response = await fetch(`${INTEGRATION_URL}/analysis-files`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -111,7 +112,7 @@ export const Analyze: React.FC = () => {
     try {
       addLog('info', 'Sending request to /analyze-application endpoint...');
 
-      const response = await fetch('http://localhost:9080/analyze-application', {
+      const response = await fetch(`${INTEGRATION_URL}/analyze-application`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

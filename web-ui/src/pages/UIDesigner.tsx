@@ -4,6 +4,7 @@ import { Button } from '../components/Button';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { AIPresetIndicator } from '../components/AIPresetIndicator';
 import { UIFrameworkIndicator } from '../components/UIFrameworkIndicator';
+import { INTEGRATION_URL } from '../api/client';
 
 type ComponentType = 'button' | 'card' | 'input' | 'alert' | 'navbar' | 'avatar' | 'progress' | 'toggle';
 type ImageFormat = 'png' | 'jpeg' | 'svg';
@@ -347,7 +348,7 @@ export const UIDesigner: React.FC = () => {
     markdown += '\n```\n';
 
     try {
-      const response = await fetch('http://localhost:9080/save-specifications', {
+      const response = await fetch(`${INTEGRATION_URL}/save-specifications`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -518,7 +519,7 @@ ${xmlEscaped}
       });
 
       // Save via backend
-      const response = await fetch('http://localhost:9080/save-image', {
+      const response = await fetch(`${INTEGRATION_URL}/save-image`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
